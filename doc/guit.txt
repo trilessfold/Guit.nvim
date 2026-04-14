@@ -1,0 +1,101 @@
+*guit.txt* *guit*   guit.nvim
+
+guit.nvim is a lightweight Git UI for Neovim built on top of fugitive.vim.
+
+===============================================================================
+COMMANDS                                                *guit-commands*
+
+:Guit log
+    Open the git log in a bottom split.
+
+:Guit show <commit_hash>
+    Open changed files for a commit in a bottom split.
+    Press <CR> on a file to open the file at that commit and run
+    :Gdiffsplit against the parent commit in Fugitive.
+
+===============================================================================
+LOG BUFFER                                              *guit-log*
+
+The git log buffer is read-only.
+
+Keys:
+    <CR>    Open the selected commit in the target window and keep focus
+            in the log pane.
+    o       Open the selected commit and move focus to the target window.
+    s       Open |:Guit show| for the selected commit in the same lower pane.
+            Returning from show restores the same log buffer and cursor line.
+    <Tab>   Jump to the target window.
+    r       Refresh the log.
+    q       Close the pane.
+    gg      Jump to the top.
+    G       Jump to the bottom and request another page.
+    ?       Show a short in-editor help message.
+
+===============================================================================
+SHOW BUFFER                                             *guit-show*
+
+The show buffer is read-only.
+
+The top of the buffer shows commit metadata:
+    full hash
+    author
+    date
+    message body
+
+The show buffer can render files in two modes:
+    tree
+    list
+
+Keys:
+    <CR>    On a file: open the Fugitive diff in the target window.
+            On a directory in tree mode: toggle the directory.
+    o       Open the selected file and move focus to the target window.
+    <Tab>   Jump to the target window.
+    -       Return to the originating |guit-log| buffer when available.
+    <BS>    Same as |-|.
+    t       Toggle between tree and list views.
+    h       Collapse the current directory. If it is already collapsed,
+            collapse its parent. On a file, collapse the parent.
+    l       Expand the current directory. If it is already expanded,
+            jump to its first child. On a file, expand its parent chain.
+    H       Collapse the current subtree.
+    L       Expand the current subtree.
+    [z      Jump to the parent directory.
+    zP      Jump to the top-level ancestor of the current branch.
+    zj      Jump to the next sibling entry.
+    zk      Jump to the previous sibling entry.
+    zM      Collapse all directories.
+    zR      Expand all directories.
+    r       Refresh the changed-files view.
+    q       Close the pane.
+    ?       Show a short in-editor help message.
+
+===============================================================================
+CONFIGURATION                                           *guit-config*
+
+>lua
+  require('guit').setup({
+    show = {
+      default_view = 'tree',
+    },
+    keymaps = {
+      open_show = 's',
+      back = '-',
+      toggle_view = 't',
+      collapse = 'h',
+      expand = 'l',
+      collapse_all = 'H',
+      expand_all = 'L',
+      help = '?',
+    },
+  })
+<
+
+===============================================================================
+NOTES                                                   *guit-notes*
+
+- Guit uses |vim.system()| for asynchronous Git calls.
+- Commit and file opening rely on fugitive.vim commands.
+- Help tags are generated when the plugin is loaded.
+- Changed-files data lives in |guit.changed_files| so it can be reused by
+  future views.
