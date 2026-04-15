@@ -69,3 +69,17 @@ The plugin generates help tags on load. Run `:help guit` after adding it to your
 
 Changed-files data loading and tree/list transformation live in `lua/guit/changed_files.lua`.
 That module is intentionally separate from the UI layer so it can be reused by future views.
+
+
+## Guit show change counts
+
+`Guit show <commit>` displays per-file and per-directory `+added/-deleted`
+counts by default. Disable it with:
+
+```lua
+require('guit').setup({
+  show = {
+    show_counts = false,
+  },
+})
+```

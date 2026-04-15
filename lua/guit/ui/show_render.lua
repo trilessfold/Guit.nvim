@@ -3,6 +3,13 @@ local ui_util = require('guit.ui.util')
 
 local M = {}
 
+
+local function format_counts(additions, deletions)
+  additions = additions or 0
+  deletions = deletions or 0
+  return string.format('%d %d', additions, deletions)
+end
+
 local function status_label(entry)
   local status = entry.status or ''
   if status:match('^R%d+$') then
@@ -20,6 +27,10 @@ local function header_lines(state)
     'Author: ' .. (meta.author or '…'),
     'Date:   ' .. ((meta.date and meta.date ~= '') and meta.date or '…'),
   }
+
+  if config.options.show.show_counts and state.summary then
+    lines[#lines + 1] = 'Changes: ' .. format_counts(state.summary.additions, state.summary.deletions)
+  end
 
   local message_lines = {}
   if meta.subject and meta.subject ~= '' then
@@ -47,12 +58,20 @@ function M.format_entry(entry)
   local indent = string.rep('  ', entry.depth or 0)
   if entry.kind == 'dir' then
     local icon = entry.expanded and '▾' or '▸'
-    return string.format('%s%s %s/', indent, icon, entry.name)
+    local line = string.format('%s%s %s/', indent, icon, entry.name)
+    if config.options.show.show_counts then
+      line = line .. '  ' .. format_counts(entry.additions, entry.deletions)
+    end
+    return line
   end
 
   local label = status_label(entry)
   local renamed = entry.old_path and ('  ← ' .. entry.old_path) or ''
-  return string.format('%s%-2s %s%s', indent, label, entry.name, renamed)
+  local line = string.format('%s%-2s %s%s', indent, label, entry.name, renamed)
+  if config.options.show.show_counts then
+    line = line .. '  ' .. format_counts(entry.additions, entry.deletions)
+  end
+  return line
 end
 
 function M.render_all(state)
@@ -75,6 +94,17 @@ function M.render_all(state)
     elseif i == 3 then
       hls[#hls + 1] = { row, 0, 5, config.options.highlights.date }
       hls[#hls + 1] = { row, 8, -1, config.options.highlights.subject }
+    elseif config.options.show.show_counts and i == 4 then
+      hls[#hls + 1] = { row, 0, 8, config.options.highlights.status }
+      local counts_start = #'Changes: '
+      local counts_text = header[i]:sub(counts_start + 1)
+      local add_text, del_text = counts_text:match('^(%d+)%s+(%d+)$')
+      if add_text then
+        local add_col = counts_start
+        hls[#hls + 1] = { row, add_col, add_col + #add_text, config.options.highlights.additions }
+        local del_col = counts_start + #add_text + 1
+        hls[#hls + 1] = { row, del_col, del_col + #del_text, config.options.highlights.deletions }
+      end
     else
       hls[#hls + 1] = { row, 0, -1, config.options.highlights.date }
     end
@@ -92,17 +122,42 @@ function M.render_all(state)
       if entry.kind == 'dir' then
         local start_col = #string.rep('  ', entry.depth or 0)
         hls[#hls + 1] = { row, start_col, start_col + 1, config.options.highlights.refs }
-        hls[#hls + 1] = { row, start_col + 2, -1, config.options.highlights.dir }
+        local counts_start = config.options.show.show_counts and line:match('.*()  %d+ %d+$') or nil
+        if counts_start then
+          hls[#hls + 1] = { row, start_col + 2, counts_start - 1, config.options.highlights.dir }
+          local counts_text = line:sub(counts_start + 2)
+          local add_text, del_text = counts_text:match('^(%d+)%s+(%d+)$')
+          if add_text then
+            local add_col = counts_start + 1
+            hls[#hls + 1] = { row, add_col, add_col + #add_text, config.options.highlights.additions }
+            local del_col = add_col + #add_text + 1
+            hls[#hls + 1] = { row, del_col, del_col + #del_text, config.options.highlights.deletions }
+          end
+        else
+          hls[#hls + 1] = { row, start_col + 2, -1, config.options.highlights.dir }
+        end
       else
         local indent = #string.rep('  ', entry.depth or 0)
         hls[#hls + 1] = { row, indent, indent + 2, config.options.highlights.status }
+        local counts_start = config.options.show.show_counts and line:match('.*()  %d+ %d+$') or nil
         local name_start = indent + 3
-        local name_end = name_start + #entry.name
+        local name_end = counts_start and (counts_start - 1) or (name_start + #entry.name)
         hls[#hls + 1] = { row, name_start, name_end, config.options.highlights.file }
         if entry.old_path then
           local old_start = line:find('← ', 1, true)
           if old_start then
-            hls[#hls + 1] = { row, old_start - 1, -1, config.options.highlights.date }
+            local old_end = counts_start and (counts_start - 1) or -1
+            hls[#hls + 1] = { row, old_start - 1, old_end, config.options.highlights.date }
+          end
+        end
+        if counts_start then
+          local counts_text = line:sub(counts_start + 2)
+          local add_text, del_text = counts_text:match('^(%d+)%s+(%d+)$')
+          if add_text then
+            local add_col = counts_start + 1
+            hls[#hls + 1] = { row, add_col, add_col + #add_text, config.options.highlights.additions }
+            local del_col = add_col + #add_text + 1
+            hls[#hls + 1] = { row, del_col, del_col + #del_text, config.options.highlights.deletions }
           end
         end
       end

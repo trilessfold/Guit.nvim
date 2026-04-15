@@ -264,8 +264,32 @@ local function refresh(state)
     end
 
     state.items = items or {}
-    state.tree_state = changed_files.build_state(state.items)
-    rerender(state)
+
+    local function apply_items()
+      state.tree_state = changed_files.build_state(state.items)
+      rerender(state)
+    end
+
+    if config.options.show.show_counts then
+      changed_files.fetch_numstat({ cwd = state.cwd, commit = state.commit }, function(stats, total, stats_err)
+        if not vim.api.nvim_buf_is_valid(state.bufnr) then
+          return
+        end
+        if stats_err then
+          vim.notify('guit.nvim: ' .. stats_err, vim.log.levels.WARN)
+          state.summary = { additions = 0, deletions = 0 }
+          apply_items()
+          return
+        end
+
+        changed_files.enrich_with_numstat(state.items, stats or {})
+        state.summary = total or { additions = 0, deletions = 0 }
+        apply_items()
+      end)
+    else
+      state.summary = nil
+      apply_items()
+    end
   end)
   fetch_meta(state)
 end

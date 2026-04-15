@@ -4,4 +4,5 @@ guit-config	guit.txt	/*guit-config*
 guit-log	guit.txt	/*guit-log*
 guit-notes	guit.txt	/*guit-notes*
 guit-show	guit.txt	/*guit-show*
+guit-show_counts	guit.txt	/*guit-show_counts*
 guit.txt	guit.txt	/*guit.txt*

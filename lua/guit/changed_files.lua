@@ -8,6 +8,62 @@ function M.parent_of(commit)
   return parent_spec(commit)
 end
 
+local function parse_name_status(output)
+  local items = {}
+  for _, line in ipairs(vim.split(output or '', '\n', { trimempty = true })) do
+    local status, rest = line:match('^(%S+)%s+(.+)$')
+    if status and rest then
+      local path = rest
+      local old_path = nil
+      if status:match('^R%d+$') or status:match('^C%d+$') then
+        local left, right = rest:match('^(.-)%s+(.+)$')
+        old_path = left
+        path = right or rest
+      end
+
+      items[#items + 1] = {
+        status = status,
+        path = path,
+        old_path = old_path,
+        kind = 'file',
+        additions = 0,
+        deletions = 0,
+      }
+    end
+  end
+  return items
+end
+
+local function parse_numstat(output)
+  local stats = {}
+  local total = { additions = 0, deletions = 0 }
+
+  for _, line in ipairs(vim.split(output or '', '\n', { trimempty = true })) do
+    local add_s, del_s, path = line:match('^(%S+)\t(%S+)\t(.+)$')
+    if add_s and del_s and path then
+      local additions = tonumber(add_s) or 0
+      local deletions = tonumber(del_s) or 0
+      stats[path] = {
+        additions = additions,
+        deletions = deletions,
+      }
+      total.additions = total.additions + additions
+      total.deletions = total.deletions + deletions
+    end
+  end
+
+  return stats, total
+end
+
+function M.enrich_with_numstat(items, stats)
+  for _, item in ipairs(items or {}) do
+    local entry = stats and stats[item.path]
+    item.additions = entry and entry.additions or 0
+    item.deletions = entry and entry.deletions or 0
+  end
+  return items
+end
+
 function M.fetch_changed_files(opts, on_done)
   local args = {
     'git',
@@ -32,28 +88,37 @@ function M.fetch_changed_files(opts, on_done)
         return
       end
 
-      local items = {}
-      for _, line in ipairs(vim.split(result.stdout or '', '\n', { trimempty = true })) do
-        local status, rest = line:match('^(%S+)%s+(.+)$')
-        if status and rest then
-          local path = rest
-          local old_path = nil
-          if status:match('^R%d+$') or status:match('^C%d+$') then
-            local left, right = rest:match('^(.-)%s+(.+)$')
-            old_path = left
-            path = right or rest
-          end
+      on_done(parse_name_status(result.stdout))
+    end)
+  end)
+end
 
-          items[#items + 1] = {
-            status = status,
-            path = path,
-            old_path = old_path,
-            kind = 'file',
-          }
-        end
+function M.fetch_numstat(opts, on_done)
+  local args = {
+    'git',
+    '--no-pager',
+    'diff-tree',
+    '--root',
+    '--find-renames',
+    '--no-commit-id',
+    '--numstat',
+    '-r',
+    ('--format='),
+    opts.commit,
+  }
+
+  vim.system(args, {
+    cwd = opts.cwd,
+    text = true,
+  }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        on_done(nil, nil, (result.stderr or result.stdout or 'git diff-tree --numstat failed'):gsub('%s+$', ''))
+        return
       end
 
-      on_done(items)
+      local stats, total = parse_numstat(result.stdout)
+      on_done(stats, total)
     end)
   end)
 end
@@ -65,6 +130,8 @@ local function tree_node(name, full_path)
     kind = 'dir',
     children = {},
     _child_map = {},
+    additions = 0,
+    deletions = 0,
   }
 end
 
@@ -87,6 +154,8 @@ function M.build_tree(items)
           full_path = item.path,
           status = item.status,
           old_path = item.old_path,
+          additions = item.additions or 0,
+          deletions = item.deletions or 0,
         }
       else
         local next_node = node._child_map[part]
@@ -114,7 +183,22 @@ function M.build_tree(items)
     end
   end
 
+  local function aggregate(node)
+    local additions = 0
+    local deletions = 0
+    for _, child in ipairs(node.children) do
+      if child.kind == 'dir' then
+        aggregate(child)
+      end
+      additions = additions + (child.additions or 0)
+      deletions = deletions + (child.deletions or 0)
+    end
+    node.additions = additions
+    node.deletions = deletions
+  end
+
   sort_children(root)
+  aggregate(root)
   return root
 end
 
@@ -147,6 +231,8 @@ function M.flatten_tree(root, expanded)
           name = child.name,
           full_path = child.full_path,
           expanded = is_expanded,
+          additions = child.additions or 0,
+          deletions = child.deletions or 0,
         }
         if is_expanded then
           visit(child, depth + 1)
@@ -159,6 +245,8 @@ function M.flatten_tree(root, expanded)
           full_path = child.full_path,
           status = child.status,
           old_path = child.old_path,
+          additions = child.additions or 0,
+          deletions = child.deletions or 0,
         }
       end
     end
@@ -182,6 +270,8 @@ function M.as_list(items)
       full_path = item.path,
       status = item.status,
       old_path = item.old_path,
+      additions = item.additions or 0,
+      deletions = item.deletions or 0,
     }
   end
 

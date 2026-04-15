@@ -29,6 +29,7 @@ M.defaults = {
   },
   show = {
     default_view = 'tree',
+    show_counts = true,
   },
   git = {
     pretty = table.concat({
@@ -54,6 +55,8 @@ M.defaults = {
     loading = 'GuitLoading',
     counter = 'GuitCounter',
     selected = 'GuitSelected',
+    additions = 'GuitAdditions',
+    deletions = 'GuitDeletions',
   },
 }
 
