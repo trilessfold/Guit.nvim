@@ -3,17 +3,78 @@ local ui_util = require('guit.ui.util')
 
 local M = {}
 
+local function display_width(text)
+  return vim.fn.strdisplaywidth(text)
+end
+
+local function fit_display(text, width)
+  if display_width(text) <= width then
+    return text .. string.rep(' ', width - display_width(text))
+  end
+
+  local acc = {}
+  local used = 0
+  local i = 0
+  local limit = math.max(width - 1, 0)
+  while i < vim.fn.strchars(text) do
+    local ch = vim.fn.strcharpart(text, i, 1)
+    local w = display_width(ch)
+    if used + w > limit then
+      break
+    end
+    acc[#acc + 1] = ch
+    used = used + w
+    i = i + 1
+  end
+  local clipped = table.concat(acc) .. '…'
+  local clipped_w = display_width(clipped)
+  if clipped_w < width then
+    clipped = clipped .. string.rep(' ', width - clipped_w)
+  end
+  return clipped
+end
+
 local function clamp_subject(subject)
   local max = config.options.max_subject_width
-  if vim.fn.strdisplaywidth(subject) <= max then
+  if display_width(subject) <= max then
     return subject
   end
-  return vim.fn.strcharpart(subject, 0, max - 1) .. '…'
+
+  local acc = {}
+  local used = 0
+  local i = 0
+  local limit = math.max(max - 1, 0)
+  while i < vim.fn.strchars(subject) do
+    local ch = vim.fn.strcharpart(subject, i, 1)
+    local w = display_width(ch)
+    if used + w > limit then
+      break
+    end
+    acc[#acc + 1] = ch
+    used = used + w
+    i = i + 1
+  end
+  return table.concat(acc) .. '…'
 end
 
 function M.format_item(item)
+  local hash = fit_display(item.short_hash, 10)
+  local date = fit_display(item.date, 16)
+  local author = fit_display(item.author, 20)
   local refs = item.refs ~= '' and (' ' .. item.refs) or ''
-  return string.format('%-10s  %-16s  %-20s%s  %s', item.short_hash, item.date, item.author, refs, clamp_subject(item.subject))
+  local subject = clamp_subject(item.subject)
+
+  local line = table.concat({ hash, '  ', date, '  ', author, refs, '  ', subject })
+  return line, {
+    hash_start = 0,
+    hash_end = #hash,
+    date_start = #hash + 2,
+    date_end = #hash + 2 + #date,
+    author_start = #hash + 2 + #date + 2,
+    author_end = #hash + 2 + #date + 2 + #author,
+    refs_start = #hash + 2 + #date + 2 + #author,
+    refs_end = #hash + 2 + #date + 2 + #author + #refs,
+  }
 end
 
 function M.render_lines(state, start_idx)
@@ -24,27 +85,17 @@ function M.render_lines(state, start_idx)
 
   for i = start_idx, #state.items do
     local item = state.items[i]
-    local line = M.format_item(item)
+    local line, spans = M.format_item(item)
     lines[#lines + 1] = line
 
     local row = offset + (#lines - 1)
-    local hash_width = 10
-    local date_width = 16
-    local author_width = 20
-    local hash_end = hash_width
-    local date_start = hash_width + 2
-    local date_end = date_start + date_width
-    local author_start = date_end + 2
-    local author_end = author_start + #item.author
-    local refs_start = author_start + author_width
 
-    highlights[#highlights + 1] = { row, 0, hash_end, config.options.highlights.hash }
-    highlights[#highlights + 1] = { row, date_start, date_end, config.options.highlights.date }
-    highlights[#highlights + 1] = { row, author_start, author_end, config.options.highlights.author }
+    highlights[#highlights + 1] = { row, spans.hash_start, spans.hash_end, config.options.highlights.hash }
+    highlights[#highlights + 1] = { row, spans.date_start, spans.date_end, config.options.highlights.date }
+    highlights[#highlights + 1] = { row, spans.author_start, spans.author_end, config.options.highlights.author }
 
     if item.refs ~= '' then
-      local refs_end = refs_start + 1 + #item.refs
-      highlights[#highlights + 1] = { row, refs_start, refs_end, config.options.highlights.refs }
+      highlights[#highlights + 1] = { row, spans.refs_start, spans.refs_end, config.options.highlights.refs }
     end
   end
 

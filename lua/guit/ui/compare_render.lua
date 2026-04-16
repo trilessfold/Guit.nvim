@@ -42,16 +42,10 @@ local function header_lines(state)
   local meta = state.meta or {}
   local left = meta.left or { input = state.left, short_hash = state.left }
   local right = meta.right or { input = state.right, short_hash = state.right }
-
-  local function revision_line(label, rev)
-    local hash = rev.short_hash or rev.input or ''
-    local subject = rev.subject and rev.subject ~= '' and ('  ' .. rev.subject) or ''
-    return string.format('%-8s%s%s', label .. ':', hash, subject)
-  end
-
   local lines = {
-    revision_line('Left', left),
-    revision_line('Right', right),
+    'Compare: ' .. state.left .. '..' .. state.right,
+    'Left:    ' .. (left.short_hash or left.input or state.left),
+    'Right:   ' .. (right.short_hash or right.input or state.right),
   }
 
   if meta.behind ~= nil and meta.ahead ~= nil then
@@ -59,6 +53,20 @@ local function header_lines(state)
   end
   if config.options.show.show_counts and state.summary then
     lines[#lines + 1] = 'Changes: ' .. format_counts(state.summary.additions, state.summary.deletions)
+  end
+
+  local notes = {}
+  if left.subject and left.subject ~= '' then
+    notes[#notes + 1] = 'Left message: ' .. left.subject
+  end
+  if right.subject and right.subject ~= '' then
+    notes[#notes + 1] = 'Right message: ' .. right.subject
+  end
+  if #notes > 0 then
+    lines[#lines + 1] = ''
+    for _, line in ipairs(notes) do
+      lines[#lines + 1] = line
+    end
   end
 
   lines[#lines + 1] = ''
@@ -75,19 +83,15 @@ function M.render_all(state)
   for i = 1, #header do
     local row = i - 1
     local line = header[i]
-    if vim.startswith(line, 'Left:') or vim.startswith(line, 'Right:') then
-      local label_len = line:find(':', 1, true) or 0
-      local value_start = 8
-      hls[#hls + 1] = { row, 0, label_len, config.options.highlights.status }
-      local content = line:sub(value_start + 1)
-      local hash_text, subject_text = content:match('^(%S+)%s%s+(.+)$')
-      if hash_text then
-        hls[#hls + 1] = { row, value_start, value_start + #hash_text, config.options.highlights.hash }
-        local subject_col = value_start + #hash_text + 2
-        hls[#hls + 1] = { row, subject_col, -1, config.options.highlights.subject }
-      elseif content ~= '' then
-        hls[#hls + 1] = { row, value_start, -1, config.options.highlights.hash }
-      end
+    if vim.startswith(line, 'Compare:') then
+      hls[#hls + 1] = { row, 0, 8, config.options.highlights.title }
+      hls[#hls + 1] = { row, 9, -1, config.options.highlights.subject }
+    elseif vim.startswith(line, 'Left:') then
+      hls[#hls + 1] = { row, 0, 5, config.options.highlights.author }
+      hls[#hls + 1] = { row, 9, -1, config.options.highlights.hash }
+    elseif vim.startswith(line, 'Right:') then
+      hls[#hls + 1] = { row, 0, 6, config.options.highlights.date }
+      hls[#hls + 1] = { row, 9, -1, config.options.highlights.hash }
     elseif vim.startswith(line, 'Ahead/Behind:') then
       hls[#hls + 1] = { row, 0, 12, config.options.highlights.status }
       local counts = line:sub(15)
