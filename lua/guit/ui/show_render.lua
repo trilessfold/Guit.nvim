@@ -3,13 +3,6 @@ local ui_util = require('guit.ui.util')
 
 local M = {}
 
-
-local function format_counts(additions, deletions)
-  additions = additions or 0
-  deletions = deletions or 0
-  return string.format('%d %d', additions, deletions)
-end
-
 local function status_label(entry)
   local status = entry.status or ''
   if status:match('^R%d+$') then
@@ -18,6 +11,28 @@ local function status_label(entry)
     return 'C'
   end
   return status
+end
+
+local function status_highlight(entry)
+  local status = status_label(entry)
+  if status == 'M' then
+    return config.options.highlights.status_modified
+  elseif status == 'A' then
+    return config.options.highlights.status_added
+  elseif status == 'D' then
+    return config.options.highlights.status_deleted
+  elseif status == 'R' then
+    return config.options.highlights.status_renamed
+  elseif status == 'C' then
+    return config.options.highlights.status_copied
+  end
+  return config.options.highlights.status
+end
+
+local function format_counts(additions, deletions)
+  additions = additions or 0
+  deletions = deletions or 0
+  return string.format('%d %d', additions, deletions)
 end
 
 local function header_lines(state)
@@ -138,7 +153,7 @@ function M.render_all(state)
         end
       else
         local indent = #string.rep('  ', entry.depth or 0)
-        hls[#hls + 1] = { row, indent, indent + 2, config.options.highlights.status }
+        hls[#hls + 1] = { row, indent, indent + 2, status_highlight(entry) }
         local counts_start = config.options.show.show_counts and line:match('.*()  %d+ %d+$') or nil
         local name_start = indent + 3
         local name_end = counts_start and (counts_start - 1) or (name_start + #entry.name)

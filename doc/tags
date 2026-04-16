@@ -1,5 +1,6 @@
 guit	guit.txt	/*guit*
 guit-commands	guit.txt	/*guit-commands*
+guit-compare	guit.txt	/*guit-compare*
 guit-config	guit.txt	/*guit-config*
 guit-log	guit.txt	/*guit-log*
 guit-notes	guit.txt	/*guit-notes*

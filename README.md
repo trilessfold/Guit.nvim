@@ -83,3 +83,30 @@ require('guit').setup({
   },
 })
 ```
+
+
+## Compare revisions
+
+```vim
+:Guit compare main feature
+:Guit compare main..feature
+```
+
+This opens a bottom compare pane similar to `Guit show`, with tree/list views,
+change counts, and Fugitive diff opening for the selected file between the two
+revisions.
+
+
+## Command-line completion
+
+`Guit compare` completes local branches, remote branches, tags, and `HEAD`.
+
+## File status colors
+
+Changed-file statuses are color-coded in tree and list views:
+
+- `M` modified
+- `A` added
+- `D` deleted
+- `R` renamed
+- `C` copied

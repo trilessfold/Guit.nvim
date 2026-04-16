@@ -57,6 +57,14 @@ M.defaults = {
     selected = 'GuitSelected',
     additions = 'GuitAdditions',
     deletions = 'GuitDeletions',
+    status_modified = 'GuitStatusModified',
+    status_added = 'GuitStatusAdded',
+    status_deleted = 'GuitStatusDeleted',
+    status_renamed = 'GuitStatusRenamed',
+    status_copied = 'GuitStatusCopied',
+  },
+  revisions = {
+    include_head = true,
   },
 }
 

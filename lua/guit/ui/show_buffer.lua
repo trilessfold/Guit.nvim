@@ -486,8 +486,8 @@ local function show_help(state)
     '  -     return to the originating Guit log buffer when available',
     '  [z    jump to parent directory',
     '  zP    jump to top-level directory for the current branch',
-    '  zj    jump to next sibling entry',
-    '  zk    jump to previous sibling entry',
+    '  zj/zJ jump to next sibling entry',
+    '  zk/zK jump to previous sibling entry',
     '',
     'Views',
     '  t     toggle tree/list',
@@ -619,7 +619,13 @@ local function set_keymaps(state)
   vim.keymap.set('n', 'zj', function()
     jump_sibling(state, 1)
   end, opts)
+  vim.keymap.set('n', 'zJ', function()
+    jump_sibling(state, 1)
+  end, opts)
   vim.keymap.set('n', 'zk', function()
+    jump_sibling(state, -1)
+  end, opts)
+  vim.keymap.set('n', 'zK', function()
     jump_sibling(state, -1)
   end, opts)
 
