@@ -3,7 +3,6 @@ local M = {}
 M.defaults = {
   page_size_factor = 3,
   prefetch_threshold_factor = 1,
-  max_subject_width = 72,
   date_format = '%Y-%m-%d %H:%M',
   layout = {
     mode = 'split',

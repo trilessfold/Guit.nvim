@@ -34,35 +34,13 @@ local function fit_display(text, width)
   return clipped
 end
 
-local function clamp_subject(subject)
-  local max = config.options.max_subject_width
-  if display_width(subject) <= max then
-    return subject
-  end
-
-  local acc = {}
-  local used = 0
-  local i = 0
-  local limit = math.max(max - 1, 0)
-  while i < vim.fn.strchars(subject) do
-    local ch = vim.fn.strcharpart(subject, i, 1)
-    local w = display_width(ch)
-    if used + w > limit then
-      break
-    end
-    acc[#acc + 1] = ch
-    used = used + w
-    i = i + 1
-  end
-  return table.concat(acc) .. '…'
-end
 
 function M.format_item(item)
   local hash = fit_display(item.short_hash, 10)
   local date = fit_display(item.date, 16)
   local author = fit_display(item.author, 20)
   local refs = item.refs ~= '' and (' ' .. item.refs) or ''
-  local subject = clamp_subject(item.subject)
+  local subject = item.subject
 
   local line = table.concat({ hash, '  ', date, '  ', author, refs, '  ', subject })
   return line, {
