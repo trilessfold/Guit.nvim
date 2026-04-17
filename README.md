@@ -4,7 +4,7 @@ A lightweight Git log and commit browser for Neovim, built as a thin layer on to
 
 ## Features
 
-- `:Guit log` opens a paged git log in a bottom pane
+- `:Guit log [rev]` opens a paged git log in a bottom pane
 - `:Guit show <commit>` opens changed files for a commit in a bottom pane
 - Read-only UI buffers for both log and show panes
 - Tree or list mode for changed files, with live toggling
@@ -32,8 +32,8 @@ require('guit').setup({
 
 ## Commands
 
-- `:Guit log`
-- `:Guit show <commit_hash>`
+- `:Guit log [rev]`
+- `:Guit show <rev>`
 
 ## Keymaps
 

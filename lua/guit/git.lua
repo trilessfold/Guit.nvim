@@ -17,7 +17,8 @@ function M.repo_root(cwd)
 end
 
 function M.fetch_total_count(opts, on_done)
-  vim.system({ 'git', 'rev-list', '--count', 'HEAD' }, {
+  local args = { 'git', 'rev-list', '--count', opts.rev or 'HEAD' }
+  vim.system(args, {
     cwd = opts.cwd,
     text = true,
   }, function(result)
@@ -46,6 +47,10 @@ function M.fetch_page(opts, on_done)
     ('-n%d'):format(opts.limit),
     ('--pretty=format:%s'):format(config.options.git.pretty),
   }
+
+  if opts.rev and opts.rev ~= '' then
+    args[#args + 1] = opts.rev
+  end
 
   vim.system(args, {
     cwd = opts.cwd,

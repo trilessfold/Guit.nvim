@@ -53,7 +53,6 @@ function M.complete_refs(arglead, cwd)
 end
 
 function M.complete_compare(arglead, cmdline, cwd)
-  local parts = vim.split(cmdline, '%s+', { trimempty = true })
   local refs = M.list_refs(cwd)
 
   if arglead:find('%.%.') then
@@ -69,23 +68,29 @@ function M.complete_compare(arglead, cmdline, cwd)
     return out
   end
 
-  if #parts <= 2 then
-    return M.complete_refs(arglead, cwd)
-  end
-
   return M.complete_refs(arglead, cwd)
+end
+
+local function subcommand_matches(arglead)
+  return vim.tbl_filter(function(item)
+    return arglead == '' or vim.startswith(item, arglead)
+  end, { 'log', 'show', 'compare' })
 end
 
 function M.complete(arglead, cmdline, cwd)
   local parts = vim.split(cmdline, '%s+', { trimempty = true })
-  if #parts <= 2 then
-    return vim.tbl_filter(function(item)
-      return arglead == '' or vim.startswith(item, arglead)
-    end, { 'log', 'show', 'compare' })
+  local trailing_space = cmdline:match('%s$') ~= nil
+
+  if #parts <= 1 then
+    return subcommand_matches(arglead)
+  end
+
+  if #parts == 2 and not trailing_space then
+    return subcommand_matches(arglead)
   end
 
   local sub = parts[2]
-  if sub == 'show' then
+  if sub == 'show' or sub == 'log' then
     return M.complete_refs(arglead, cwd)
   elseif sub == 'compare' then
     return M.complete_compare(arglead, cmdline, cwd)

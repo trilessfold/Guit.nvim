@@ -103,7 +103,7 @@ local function open_commit(state, commit, opts)
 end
 
 local function fetch_total_count(state)
-  git.fetch_total_count({ cwd = state.cwd }, function(count, err)
+  git.fetch_total_count({ cwd = state.cwd, rev = state.rev }, function(count, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then
       return
     end
@@ -131,6 +131,7 @@ local function fetch_more(state, force)
 
   git.fetch_page({
     cwd = state.cwd,
+    rev = state.rev,
     skip = #state.items,
     limit = page_size_for(state.winid),
   }, function(payload, err)
@@ -306,6 +307,7 @@ function M.open(opts)
     winid = winid,
     target_winid = target_winid,
     cwd = opts.cwd,
+    rev = opts.rev,
     ns = vim.api.nvim_create_namespace(('guit-%d'):format(bufnr)),
     selection_ns = vim.api.nvim_create_namespace(('guit-select-%d'):format(bufnr)),
     items = {},

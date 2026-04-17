@@ -10,7 +10,12 @@ function M.setup(opts)
   config.setup(opts)
 end
 
-function M.log(opts)
+function M.log(rev, opts)
+  if type(rev) == 'table' and opts == nil then
+    opts = rev
+    rev = nil
+  end
+
   local cwd = (opts and opts.cwd) or vim.uv.cwd()
   local repo, err = git.repo_root(cwd)
   if not repo then
@@ -18,7 +23,7 @@ function M.log(opts)
     return
   end
 
-  buffer.open({ cwd = repo })
+  buffer.open(vim.tbl_extend('force', opts or {}, { cwd = repo, rev = rev }))
 end
 
 function M.show(commit, opts)
@@ -56,7 +61,7 @@ end
 function M.command(args)
   local sub = args[1]
   if sub == 'log' then
-    return M.log()
+    return M.log(args[2])
   elseif sub == 'show' then
     return M.show(args[2])
   elseif sub == 'compare' then
@@ -71,7 +76,7 @@ function M.command(args)
     return M.compare(left, right)
   end
 
-  vim.notify('guit.nvim: usage :Guit log | :Guit show <commit_hash> | :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
+  vim.notify('guit.nvim: usage :Guit log [rev] | :Guit show <rev> | :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
 end
 
 return M
