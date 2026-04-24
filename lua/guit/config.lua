@@ -24,6 +24,8 @@ M.defaults = {
     expand_all = 'L',
     help = '?',
     open_show = 's',
+    commit = 'c',
+    commit_focus = 'C',
     back = '-',
   },
   show = {

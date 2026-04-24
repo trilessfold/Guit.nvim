@@ -3,6 +3,7 @@ local git = require('guit.git')
 local buffer = require('guit.ui.buffer')
 local show_buffer = require('guit.ui.show_buffer')
 local compare_buffer = require('guit.ui.compare_buffer')
+local history_buffer = require('guit.ui.history_buffer')
 
 local M = {}
 
@@ -42,6 +43,30 @@ function M.show(commit, opts)
   show_buffer.open(vim.tbl_extend('force', opts or {}, { cwd = repo, commit = commit }))
 end
 
+function M.history(path, opts)
+  if not path or path == '' then
+    vim.notify('guit.nvim: usage :Guit history <file_or_directory>', vim.log.levels.INFO)
+    return
+  end
+
+  local cwd = (opts and opts.cwd) or vim.uv.cwd()
+  local repo, err = git.repo_root(cwd)
+  if not repo then
+    vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
+    return
+  end
+
+  local rel = require('guit.history').normalize_path(repo, path)
+  local abs = vim.fn.fnamemodify(path, ':p')
+  local stat_path = abs
+  if vim.fn.filereadable(abs) == 0 and vim.fn.isdirectory(abs) == 0 then
+    stat_path = repo .. '/' .. rel
+  end
+  local stat = vim.uv.fs_stat(stat_path)
+  local is_file = stat and stat.type == 'file' or false
+  history_buffer.open(vim.tbl_extend('force', opts or {}, { cwd = repo, path = rel, path_display = path, is_file = is_file }))
+end
+
 function M.compare(left, right, opts)
   if (not left or left == '') or (not right or right == '') then
     vim.notify('guit.nvim: usage :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
@@ -64,6 +89,8 @@ function M.command(args)
     return M.log(args[2])
   elseif sub == 'show' then
     return M.show(args[2])
+  elseif sub == 'history' then
+    return M.history(table.concat(vim.list_slice(args, 2), ' '))
   elseif sub == 'compare' then
     local left = args[2]
     local right = args[3]
@@ -76,7 +103,7 @@ function M.command(args)
     return M.compare(left, right)
   end
 
-  vim.notify('guit.nvim: usage :Guit log [rev] | :Guit show <rev> | :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
+  vim.notify('guit.nvim: usage :Guit log [rev] | :Guit show <rev> | :Guit history <path> | :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
 end
 
 return M

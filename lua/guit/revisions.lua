@@ -74,7 +74,7 @@ end
 local function subcommand_matches(arglead)
   return vim.tbl_filter(function(item)
     return arglead == '' or vim.startswith(item, arglead)
-  end, { 'log', 'show', 'compare' })
+  end, { 'log', 'show', 'history', 'compare' })
 end
 
 function M.complete(arglead, cmdline, cwd)
@@ -92,6 +92,8 @@ function M.complete(arglead, cmdline, cwd)
   local sub = parts[2]
   if sub == 'show' or sub == 'log' then
     return M.complete_refs(arglead, cwd)
+  elseif sub == 'history' then
+    return vim.fn.getcompletion(arglead, 'file')
   elseif sub == 'compare' then
     return M.complete_compare(arglead, cmdline, cwd)
   end

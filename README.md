@@ -110,3 +110,24 @@ Changed-file statuses are color-coded in tree and list views:
 - `D` deleted
 - `R` renamed
 - `C` copied
+
+
+Guit history
+------------
+
+Command:
+
+    :Guit history <file-or-directory>
+
+Shows commits that touched the given file or directory in a lower pane.
+
+Keys:
+
+    <CR>  open commit preview in the target window and keep focus in history
+    o     open commit preview and move focus to target window
+    s     open Guit show for the selected commit in the lower pane
+    <Tab> jump to the target window
+    r     refresh history
+    q     close history
+
+The compact stats column uses: <files>f <additions> <deletions>.
