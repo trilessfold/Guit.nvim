@@ -63,14 +63,18 @@ local function parse_show_stats(output)
   return stats
 end
 
-local function fetch_commit_stats(cwd, hashes, on_done)
+local function fetch_commit_stats(cwd, path, hashes, on_done)
   if not hashes or #hashes == 0 then
     on_done({})
     return
   end
 
-  local args = { 'git', '--no-pager', 'show', '--no-patch', '--shortstat', '--format=' .. REC .. '%H', '--color=never' }
+  local args = { 'git', '--no-pager', 'show', '--shortstat', '--format=' .. REC .. '%H', '--color=never' }
   vim.list_extend(args, hashes)
+  if path and path ~= '' then
+    args[#args + 1] = '--'
+    args[#args + 1] = path
+  end
 
   vim.system(args, { cwd = cwd, text = true }, function(result)
     vim.schedule(function()
@@ -140,7 +144,7 @@ function M.fetch_page(opts, on_done)
         hashes[#hashes + 1] = item.hash
       end
 
-      fetch_commit_stats(opts.cwd, hashes, function(stats, stats_err)
+      fetch_commit_stats(opts.cwd, opts.path, hashes, function(stats, stats_err)
         if stats_err then
           on_done(nil, stats_err)
           return

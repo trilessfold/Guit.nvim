@@ -93,7 +93,11 @@ function M.complete(arglead, cmdline, cwd)
   if sub == 'show' or sub == 'log' then
     return M.complete_refs(arglead, cwd)
   elseif sub == 'history' then
-    return vim.fn.getcompletion(arglead, 'file')
+    local items = vim.fn.getcompletion(arglead, 'file')
+    if arglead == '' or vim.startswith('%', arglead) then
+      table.insert(items, 1, '%')
+    end
+    return items
   elseif sub == 'compare' then
     return M.complete_compare(arglead, cmdline, cwd)
   end

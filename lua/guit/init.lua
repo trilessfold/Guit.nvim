@@ -7,6 +7,18 @@ local history_buffer = require('guit.ui.history_buffer')
 
 local M = {}
 
+local function expand_current_buffer_path(path)
+  if path ~= '%' then
+    return path
+  end
+
+  local current = vim.fn.expand('%:p')
+  if current == '' then
+    return nil, 'current buffer has no file name'
+  end
+  return current
+end
+
 function M.setup(opts)
   config.setup(opts)
 end
@@ -48,6 +60,13 @@ function M.history(path, opts)
     vim.notify('guit.nvim: usage :Guit history <file_or_directory>', vim.log.levels.INFO)
     return
   end
+
+  local expanded_path, expand_err = expand_current_buffer_path(path)
+  if not expanded_path then
+    vim.notify('guit.nvim: ' .. expand_err, vim.log.levels.WARN)
+    return
+  end
+  path = expanded_path
 
   local cwd = (opts and opts.cwd) or vim.uv.cwd()
   local repo, err = git.repo_root(cwd)

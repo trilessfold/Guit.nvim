@@ -162,8 +162,9 @@ Guit history
 Command:
 
     :Guit history <file-or-directory>
+    :Guit history %
 
-Shows commits that touched the given file or directory in a lower pane.
+Shows commits that touched the given file or directory in a lower pane. Use `%` for the current buffer's file.
 
 Keys:
 
