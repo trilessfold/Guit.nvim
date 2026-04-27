@@ -5,28 +5,42 @@ guit.nvim is a lightweight Git UI for Neovim built on top of fugitive.vim.
 ===============================================================================
 COMMANDS                                                *guit-commands*
 
-:Guit toggle
+:Guit toggle                                             *:Guit-toggle*
     Close an open Guit pane. If no Guit pane is open, restore the last Guit
-    view; before any prior view, open |:Guit log|.
+    view; before any prior view, open |:Guit-log|. Restored views fetch fresh
+    Git data and restore the cursor by selected hash/path when possible.
 
-:Guit log [rev]
+:Guit log [rev]                                          *:Guit-log*
     Open the git log in a bottom split.
 
-:Guit show <rev>
+:Guit show <rev>                                         *:Guit-show*
     Open changed files for a commit in a bottom split.
     Press <CR> on a file to open the file at that commit and run
     :Gdiffsplit against the parent commit in Fugitive.
 
-:Guit show %
+:Guit show %                                             *:Guit-show-percent*
     From a Fugitive object buffer, open changed files for that object's commit.
 
-:Guit compare <left_rev> <right_rev>
+:Guit history {file-or-directory}                        *:Guit-history*
+    Open commits that touched {file-or-directory} in a bottom split.
+
+:Guit history %                                          *:Guit-history-percent*
+    From a normal file buffer, open history for the current file. From a
+    Fugitive object buffer, use that object's file path and start history at
+    that object's commit.
+
+:Guit compare <left_rev> <right_rev>                     *:Guit-compare*
     Compare two revisions (branches, tags, or commit hashes) in a bottom split.
     Accepts either two arguments or a single range like left..right.
     Command-line completion suggests local branches, remote branches, tags,
     and HEAD.
     Press <CR> on a file to open the right revision and diff it against the left
     revision in Fugitive.
+
+Command-line completion:
+    |:Guit-log|, |:Guit-show|, and |:Guit-compare| complete local branches,
+    remote branches, tags, and HEAD. |:Guit-show| and |:Guit-history| complete
+    % where supported.
 
 ===============================================================================
 LOG BUFFER                                              *guit-log*
@@ -37,7 +51,7 @@ Keys:
     <CR>    Open the selected commit in the target window and keep focus
             in the log pane.
     o       Open the selected commit and move focus to the target window.
-    s       Open |:Guit show| for the selected commit in the same lower pane.
+    s       Open |:Guit-show| for the selected commit in the same lower pane.
             Returning from show restores the same log buffer and cursor line.
     <Tab>   Jump to the target window.
     r       Refresh the log.
@@ -66,8 +80,11 @@ Keys:
             On a directory in tree mode: toggle the directory.
     o       Open the selected file and move focus to the target window.
     <Tab>   Jump to the target window.
-    -       Return to the originating |guit-log| buffer when available.
-    <BS>    Same as |-|.
+    -       Return to the originating |guit-log| or |guit-history| buffer when
+            available.
+            If this show view was restored by |:Guit-toggle|, the originating
+            log or history view is restored from its saved context.
+    <BS>    Same as -.
     t       Toggle between tree and list views.
     h       Collapse the current directory. If it is already collapsed,
             collapse its parent. On a file, collapse the parent.
@@ -85,52 +102,8 @@ Keys:
     q       Close the pane.
     ?       Show a short in-editor help message.
 
-===============================================================================
-CONFIGURATION                                           *guit-config*
-
->lua
-  require('guit').setup({
-    show = {
-      default_view = 'tree',
-    },
-    keymaps = {
-      open_show = 's',
-      back = '-',
-      toggle_view = 't',
-      collapse = 'h',
-      expand = 'l',
-      collapse_all = 'H',
-      expand_all = 'L',
-      help = '?',
-    },
-  })
-<
-
-===============================================================================
-NOTES                                                   *guit-notes*
-
-- Guit uses |vim.system()| for asynchronous Git calls.
-- Commit and file opening rely on fugitive.vim commands.
-- Help tags are generated when the plugin is loaded.
-- Changed-files data lives in |guit.changed_files| so it can be reused by
-  future views.
-
-CONFIGURATION~
-
-    >lua
-      require('guit').setup({
-        show = {
-          show_counts = true, -- default
-        },
-      })
-<
-
-When |guit-show| is open, file and directory entries can display added/deleted
-line counts for the selected commit. This is enabled by default and can be
-disabled with |guit-show_counts|.
-
-*guit-show_counts*
-    Boolean. Show per-file and per-directory change counts in |:Guit show|.
+When a renamed file is opened from |guit-show|, Guit opens the file at the
+selected commit and diffs it against the old path in the parent commit.
 
 ===============================================================================
 COMPARE BUFFER                                          *guit-compare*
@@ -162,25 +135,92 @@ Keys:
     q       Close the pane.
     ?       Show a short in-editor help message.
 
+===============================================================================
+HISTORY BUFFER                                          *guit-history*
 
-Guit history
-------------
-
-Command:
-
-    :Guit history <file-or-directory>
-    :Guit history %
-
-Shows commits that touched the given file or directory in a lower pane. Use `%` for the current buffer's file.
-From a Fugitive object buffer, `%` uses that object's file path and starts history at that object's commit.
+The history buffer is read-only.
 
 Keys:
 
-    <CR>  open commit preview in the target window and keep focus in history
-    o     open commit preview and move focus to target window
-    s     open Guit show for the selected commit in the lower pane
-    <Tab> jump to the target window
-    r     refresh history
-    q     close history
+    <CR>    For file history: open the file diff for the selected commit and
+            keep focus in history. For directory history: open the selected
+            commit in the target window.
+    o       Open the file diff or commit and move focus to the target window.
+    c       Open the selected commit in Fugitive and keep focus in history.
+    C       Open the selected commit in Fugitive and move focus to target.
+    s       Open |:Guit-show| for the selected commit in the same lower pane.
+            Returning from show restores the same history buffer and cursor.
+    <Tab>   Jump to the target window.
+    r       Refresh history.
+    q       Close history.
+    gg      Jump to the top.
+    G       Jump to the bottom and request another page.
+    ?       Show a short in-editor help message.
 
-The compact stats column uses: <files>f <additions> <deletions>.
+The compact stats column uses:
+    {files}f {additions} {deletions}
+
+History rows include a file-action prefix when available:
+    [M]                         modified
+    [A]                         added
+    [D]                         deleted
+    [R old/path -> new/path]    renamed
+
+For renamed files, file diffs use the old path on the parent side and the new
+path on the selected commit side.
+
+===============================================================================
+TOGGLE SESSION                                          *guit-toggle*
+
+|:Guit-toggle| closes the active Guit pane if one is open. Closing stores a
+small snapshot of the current view:
+    kind of view
+    command arguments such as revision, commit, path, or compare range
+    selected commit hash or selected file path
+    cursor fallback line
+    view mode for tree/list views
+
+When toggled open again, Guit recreates the view from that snapshot and fetches
+fresh Git data. It does not preserve rendered lines or extmarks. If the selected
+hash or path is still present, the cursor is restored there; otherwise the saved
+line number is used.
+
+If no snapshot exists, |:Guit-toggle| opens |:Guit-log|.
+
+===============================================================================
+CONFIGURATION                                           *guit-config*
+
+>lua
+  require('guit').setup({
+    show = {
+      default_view = 'tree',
+      show_counts = true,
+    },
+    keymaps = {
+      open_show = 's',
+      back = '-',
+      toggle_view = 't',
+      collapse = 'h',
+      expand = 'l',
+      collapse_all = 'H',
+      expand_all = 'L',
+      help = '?',
+    },
+  })
+<
+
+*guit-show_counts*
+    Boolean. Show per-file and per-directory change counts in |:Guit-show|,
+    |:Guit-compare|, and history-derived changed-file views where applicable.
+
+===============================================================================
+NOTES                                                   *guit-notes*
+
+- Guit uses |vim.system()| for asynchronous Git calls.
+- Commit and file opening rely on fugitive.vim commands.
+- Fugitive object support uses |FugitiveParse()| when available.
+- Help tags are generated when the plugin is loaded.
+- Changed-files data lives in |guit.changed_files| so it can be reused by
+  future views.
+
+ vim:tw=78:ts=8:ft=help:norl:
