@@ -24,16 +24,23 @@ local function prefetch_threshold_for(winid)
 end
 
 local function current_line(state)
+  if not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
+    return nil
+  end
   return vim.api.nvim_win_get_cursor(state.winid)[1]
 end
 
 local function get_current_item(state)
   local line = current_line(state)
+  if not line then
+    return nil, nil
+  end
   return state.items[line], line
 end
 
 local function snapshot(state)
   local item, line = get_current_item(state)
+  local restore = state.restore or {}
   return {
     kind = 'history',
     cwd = state.cwd,
@@ -42,8 +49,8 @@ local function snapshot(state)
     rev = state.rev,
     is_file = state.is_file,
     restore = {
-      line = line,
-      hash = item and item.hash or nil,
+      line = line or restore.line,
+      hash = item and item.hash or restore.hash,
     },
   }
 end
@@ -73,8 +80,10 @@ local function restore_cursor(state)
 end
 
 local function should_prefetch(state)
+  local line = current_line(state)
+  if not line then return false end
   if #state.items == 0 then return true end
-  local remaining = #state.items - current_line(state)
+  local remaining = #state.items - line
   return remaining <= prefetch_threshold_for(state.winid)
 end
 
@@ -230,6 +239,9 @@ local function attach_autocmds(state)
     group = group,
     buffer = state.bufnr,
     callback = function()
+      if not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
+        return
+      end
       fetch_more(state, false)
       render.update_selected_line(state)
       render.update_winbar(state)
