@@ -8,16 +8,25 @@ local fugitive = require('guit.fugitive')
 
 local M = {}
 
-local function expand_current_buffer_path(path)
-  if path ~= '%' then
-    return path
+local function current_buffer_source()
+  local fugitive_source = fugitive.from_buffer(0)
+  if fugitive_source then
+    return fugitive_source
   end
 
   local current = vim.fn.expand('%:p')
   if current == '' then
     return nil, 'current buffer has no file name'
   end
-  return current
+  return { path = current }
+end
+
+local function expand_current_buffer_path(path)
+  if path ~= '%' then
+    return { path = path }
+  end
+
+  return current_buffer_source()
 end
 
 function M.setup(opts)
@@ -72,14 +81,18 @@ function M.history(path, opts)
     return
   end
 
-  local expanded_path, expand_err = expand_current_buffer_path(path)
-  if not expanded_path then
+  local source, expand_err = expand_current_buffer_path(path)
+  if not source then
     vim.notify('guit.nvim: ' .. expand_err, vim.log.levels.WARN)
     return
   end
-  path = expanded_path
+  path = source.path
+  if not path or path == '' then
+    vim.notify('guit.nvim: current fugitive buffer does not point to a file', vim.log.levels.WARN)
+    return
+  end
 
-  local cwd = (opts and opts.cwd) or vim.uv.cwd()
+  local cwd = (opts and opts.cwd) or source.cwd or vim.uv.cwd()
   local repo, err = git.repo_root(cwd)
   if not repo then
     vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
@@ -93,8 +106,14 @@ function M.history(path, opts)
     stat_path = repo .. '/' .. rel
   end
   local stat = vim.uv.fs_stat(stat_path)
-  local is_file = stat and stat.type == 'file' or false
-  history_buffer.open(vim.tbl_extend('force', opts or {}, { cwd = repo, path = rel, path_display = path, is_file = is_file }))
+  local is_file = source.commit and source.path ~= nil or (stat and stat.type == 'file' or false)
+  history_buffer.open(vim.tbl_extend('force', opts or {}, {
+    cwd = repo,
+    path = rel,
+    path_display = path,
+    rev = source.commit,
+    is_file = is_file,
+  }))
 end
 
 function M.compare(left, right, opts)

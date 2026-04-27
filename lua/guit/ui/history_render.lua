@@ -159,6 +159,7 @@ function M.update_winbar(state)
   local spinner = state.loading and '  loading…' or ''
   local done = state.eof and loaded > 0 and '  eof' or ''
   local path = state.path_display or state.path or ''
+  local rev = state.rev and (' @ ' .. state.rev:sub(1, 12) .. ' ') or ''
 
   vim.wo[state.winid].winbar = table.concat({
     '%#' .. config.options.highlights.title .. '#',
@@ -167,6 +168,7 @@ function M.update_winbar(state)
     '%#' .. config.options.highlights.file .. '#',
     ' ' .. path .. ' ',
     '%*',
+    rev,
     '%=',
     '%#' .. config.options.highlights.counter .. '#',
     selected_label,

@@ -174,7 +174,7 @@ function M.normalize_path(repo, path)
 end
 
 function M.fetch_total_count(opts, on_done)
-  local args = { 'git', 'rev-list', '--count', 'HEAD', '--', opts.path }
+  local args = { 'git', 'rev-list', '--count', opts.rev or 'HEAD', '--', opts.path }
   vim.system(args, { cwd = opts.cwd, text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
@@ -198,6 +198,7 @@ function M.fetch_page(opts, on_done)
     ('--skip=%d'):format(opts.skip or 0),
     ('-n%d'):format(opts.limit),
     ('--pretty=format:%s'):format(pretty),
+    opts.rev or 'HEAD',
     '--', opts.path,
   }
 

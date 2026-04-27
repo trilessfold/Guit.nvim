@@ -168,6 +168,7 @@ Command:
     :Guit history %
 
 Shows commits that touched the given file or directory in a lower pane. Use `%` for the current buffer's file.
+From a Fugitive object buffer, `%` uses that object's file path and starts history at that object's commit.
 
 Keys:
 

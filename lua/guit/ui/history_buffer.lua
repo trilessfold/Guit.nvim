@@ -119,7 +119,7 @@ local function open_primary(state, item, keep_focus)
 end
 
 local function fetch_total_count(state)
-  history.fetch_total_count({ cwd = state.cwd, path = state.path }, function(count, err)
+  history.fetch_total_count({ cwd = state.cwd, path = state.path, rev = state.rev }, function(count, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
     if err then
       vim.notify('guit.nvim: ' .. err, vim.log.levels.WARN)
@@ -138,7 +138,13 @@ local function fetch_more(state, force)
   render.set_loading_line(state, '… loading file history …')
   render.update_winbar(state)
 
-  history.fetch_page({ cwd = state.cwd, path = state.path, skip = #state.items, limit = page_size_for(state.winid) }, function(payload, err)
+  history.fetch_page({
+    cwd = state.cwd,
+    path = state.path,
+    rev = state.rev,
+    skip = #state.items,
+    limit = page_size_for(state.winid),
+  }, function(payload, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
     state.loading = false
     render.clear_loading_line(state)
@@ -292,6 +298,7 @@ function M.open(opts)
     cwd = opts.cwd,
     path = opts.path,
     path_display = opts.path_display or opts.path,
+    rev = opts.rev,
     is_file = opts.is_file or false,
     ns = vim.api.nvim_create_namespace(('guit-history-%d'):format(bufnr)),
     selection_ns = vim.api.nvim_create_namespace(('guit-history-select-%d'):format(bufnr)),
