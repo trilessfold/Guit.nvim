@@ -5,6 +5,10 @@ guit.nvim is a lightweight Git UI for Neovim built on top of fugitive.vim.
 ===============================================================================
 COMMANDS                                                *guit-commands*
 
+:Guit toggle
+    Close an open Guit pane. If no Guit pane is open, restore the last Guit
+    view; before any prior view, open |:Guit log|.
+
 :Guit log [rev]
     Open the git log in a bottom split.
 

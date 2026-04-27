@@ -74,7 +74,7 @@ end
 local function subcommand_matches(arglead)
   return vim.tbl_filter(function(item)
     return arglead == '' or vim.startswith(item, arglead)
-  end, { 'log', 'show', 'history', 'compare' })
+  end, { 'toggle', 'log', 'show', 'history', 'compare' })
 end
 
 function M.complete(arglead, cmdline, cwd)

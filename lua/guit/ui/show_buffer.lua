@@ -6,6 +6,7 @@ local render = require('guit.ui.show_render')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
+local session = require('guit.session')
 
 local M = {}
 
@@ -38,6 +39,12 @@ local function return_to_log(state)
   local line = math.max(1, math.min(origin.line or 1, vim.api.nvim_buf_line_count(origin.bufnr)))
   vim.api.nvim_win_set_cursor(winid, { line, 0 })
   vim.api.nvim_set_current_win(winid)
+  local ft = vim.bo[origin.bufnr].filetype
+  if ft == 'guitlog' then
+    require('guit.ui.buffer').activate(origin.bufnr, winid)
+  elseif ft == 'guithistory' then
+    require('guit.ui.history_buffer').activate(origin.bufnr, winid)
+  end
 end
 
 local function bind_back_navigation(state, bufnr)
@@ -90,6 +97,20 @@ local function current_entry(state)
     return nil, nil
   end
   return state.entries[idx], idx
+end
+
+local function snapshot(state)
+  local entry, idx = current_entry(state)
+  return {
+    kind = 'show',
+    cwd = state.cwd,
+    commit = state.commit,
+    view_mode = state.view_mode,
+    restore = {
+      line = idx,
+      path = entry and entry.full_path or nil,
+    },
+  }
 end
 
 local function current_dir_target(state)
@@ -186,11 +207,15 @@ local function restore_cursor(state, preferred_path)
   end
 
   local target = preferred_path
+  if not target and state.restore and not state.restore_done then
+    target = state.restore.path
+  end
   if target then
     for i, entry in ipairs(state.entries) do
       if entry.full_path == target then
         vim.api.nvim_win_set_cursor(state.winid, { i + (state.entry_offset or 0), 0 })
         render.update_selected_line(state)
+        state.restore_done = true
         return
       end
     end
@@ -198,8 +223,12 @@ local function restore_cursor(state, preferred_path)
 
   local cursor = vim.api.nvim_win_get_cursor(state.winid)[1]
   local current = cursor - (state.entry_offset or 0)
+  if state.restore and not state.restore_done and state.restore.line then
+    current = state.restore.line
+  end
   local line = math.max(1, math.min(current > 0 and current or 1, #state.entries))
   vim.api.nvim_win_set_cursor(state.winid, { line + (state.entry_offset or 0), 0 })
+  state.restore_done = true
   render.update_selected_line(state)
 end
 
@@ -522,6 +551,7 @@ local function attach_autocmds(state)
     callback = function()
       render.update_selected_line(state)
       render.update_winbar(state)
+      session.update(state)
     end,
   })
 
@@ -529,6 +559,7 @@ local function attach_autocmds(state)
     group = group,
     buffer = state.bufnr,
     callback = function()
+      session.clear(state)
       state_by_buf[state.bufnr] = nil
       pcall(vim.api.nvim_del_augroup_by_id, group)
     end,
@@ -539,9 +570,7 @@ local function set_keymaps(state)
   local opts = { buffer = state.bufnr, nowait = true, silent = true }
 
   vim.keymap.set('n', config.options.keymaps.close, function()
-    if vim.api.nvim_win_is_valid(state.winid) then
-      vim.api.nvim_win_close(state.winid, true)
-    end
+    session.close_active()
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.back, function()
@@ -677,6 +706,8 @@ function M.open(opts)
     entry_offset = 0,
     meta = nil,
     source_log = opts.source_log,
+    restore = opts.restore,
+    restore_done = false,
     preview = opts.preview or {
       anchor_winid = target_winid,
       extra_wins = {},
@@ -685,6 +716,7 @@ function M.open(opts)
   }
 
   state_by_buf[bufnr] = state
+  session.register(state, snapshot)
   attach_autocmds(state)
   set_keymaps(state)
   render.update_winbar(state)

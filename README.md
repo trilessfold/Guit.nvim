@@ -32,9 +32,12 @@ require('guit').setup({
 
 ## Commands
 
+- `:Guit toggle`
 - `:Guit log [rev]`
 - `:Guit show <rev>`
 - `:Guit show %` from a Fugitive object buffer opens that object's commit.
+
+`:Guit toggle` closes an open Guit pane. If no Guit pane is open, it restores the last Guit view; before any prior view, it opens `:Guit log`.
 
 ## Keymaps
 

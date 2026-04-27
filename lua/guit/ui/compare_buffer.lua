@@ -6,6 +6,7 @@ local render = require('guit.ui.compare_render')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
+local session = require('guit.session')
 
 local M = {}
 
@@ -17,6 +18,20 @@ end
 local function current_entry(state)
   local idx = current_index(state)
   return idx and state.entries[idx] or nil, idx
+end
+local function snapshot(state)
+  local entry, idx = current_entry(state)
+  return {
+    kind = 'compare',
+    cwd = state.cwd,
+    left = state.left,
+    right = state.right,
+    view_mode = state.view_mode,
+    restore = {
+      line = idx,
+      path = entry and entry.full_path or nil,
+    },
+  }
 end
 local function current_dir_target(state)
   local entry = current_entry(state)
@@ -32,14 +47,29 @@ local function restore_cursor(state, preferred_path)
       if entry.full_path == preferred_path then
         vim.api.nvim_win_set_cursor(state.winid, { i + (state.entry_offset or 0), 0 })
         render.update_selected_line(state)
+        state.restore_done = true
+        return
+      end
+    end
+  end
+  if not preferred_path and state.restore and not state.restore_done and state.restore.path then
+    for i, entry in ipairs(state.entries) do
+      if entry.full_path == state.restore.path then
+        vim.api.nvim_win_set_cursor(state.winid, { i + (state.entry_offset or 0), 0 })
+        render.update_selected_line(state)
+        state.restore_done = true
         return
       end
     end
   end
   local cursor = vim.api.nvim_win_get_cursor(state.winid)[1]
   local current = cursor - (state.entry_offset or 0)
+  if state.restore and not state.restore_done and state.restore.line then
+    current = state.restore.line
+  end
   local line = math.max(1, math.min(current > 0 and current or 1, #state.entries))
   vim.api.nvim_win_set_cursor(state.winid, { line + (state.entry_offset or 0), 0 })
+  state.restore_done = true
   render.update_selected_line(state)
 end
 local function rerender(state, preferred_path)
@@ -110,11 +140,18 @@ local function attach_autocmds(state)
   local group = vim.api.nvim_create_augroup(('GuitCompare_%d'):format(state.bufnr), { clear = true })
   vim.api.nvim_create_autocmd({ 'CursorMoved', 'BufEnter' }, {
     group = group, buffer = state.bufnr,
-    callback = function() render.update_selected_line(state); render.update_winbar(state) end,
+    callback = function()
+      render.update_selected_line(state)
+      render.update_winbar(state)
+      session.update(state)
+    end,
   })
   vim.api.nvim_create_autocmd('BufWipeout', {
     group = group, buffer = state.bufnr,
-    callback = function() pcall(vim.api.nvim_del_augroup_by_id, group) end,
+    callback = function()
+      session.clear(state)
+      pcall(vim.api.nvim_del_augroup_by_id, group)
+    end,
   })
 end
 
@@ -268,7 +305,7 @@ end
 
 local function set_keymaps(state)
   local opts = { buffer = state.bufnr, nowait = true, silent = true }
-  vim.keymap.set('n', config.options.keymaps.close, function() if vim.api.nvim_win_is_valid(state.winid) then vim.api.nvim_win_close(state.winid, true) end end, opts)
+  vim.keymap.set('n', config.options.keymaps.close, function() session.close_active() end, opts)
   vim.keymap.set('n', config.options.keymaps.refresh, function() refresh(state) end, opts)
   vim.keymap.set('n', config.options.keymaps.focus_target, function() if state.target_winid and vim.api.nvim_win_is_valid(state.target_winid) then vim.api.nvim_set_current_win(state.target_winid) end end, opts)
   vim.keymap.set('n', config.options.keymaps.toggle_view, function() cycle_view(state) end, opts)
@@ -308,8 +345,10 @@ function M.open(opts)
     selection_ns = vim.api.nvim_create_namespace(('guit-compare-select-%d'):format(bufnr)),
     view_mode = opts.view_mode or config.options.show.default_view,
     items = {}, entries = {}, tree_state = nil, entry_offset = 0, meta = nil, summary = nil,
+    restore = opts.restore, restore_done = false,
     preview = opts.preview or { anchor_winid = target_winid, extra_wins = {}, buffers = {} },
   }
+  session.register(state, snapshot)
   attach_autocmds(state)
   set_keymaps(state)
   render.update_winbar(state)

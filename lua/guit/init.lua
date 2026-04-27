@@ -5,6 +5,7 @@ local show_buffer = require('guit.ui.show_buffer')
 local compare_buffer = require('guit.ui.compare_buffer')
 local history_buffer = require('guit.ui.history_buffer')
 local fugitive = require('guit.fugitive')
+local session = require('guit.session')
 
 local M = {}
 
@@ -132,9 +133,17 @@ function M.compare(left, right, opts)
   compare_buffer.open(vim.tbl_extend('force', opts or {}, { cwd = repo, left = left, right = right }))
 end
 
+function M.toggle()
+  session.toggle(function()
+    M.log()
+  end)
+end
+
 function M.command(args)
   local sub = args[1]
-  if sub == 'log' then
+  if sub == 'toggle' then
+    return M.toggle()
+  elseif sub == 'log' then
     return M.log(args[2])
   elseif sub == 'show' then
     return M.show(args[2])
@@ -152,7 +161,7 @@ function M.command(args)
     return M.compare(left, right)
   end
 
-  vim.notify('guit.nvim: usage :Guit log [rev] | :Guit show <rev> | :Guit history <path> | :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
+  vim.notify('guit.nvim: usage :Guit toggle | :Guit log [rev] | :Guit show <rev> | :Guit history <path> | :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
 end
 
 return M

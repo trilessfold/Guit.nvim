@@ -6,6 +6,7 @@ local show_buffer = require('guit.ui.show_buffer')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
+local session = require('guit.session')
 
 local M = {}
 
@@ -28,6 +29,43 @@ end
 local function get_current_item(state)
   local line = current_line(state)
   return state.items[line], line
+end
+
+local function snapshot(state)
+  local item, line = get_current_item(state)
+  return {
+    kind = 'log',
+    cwd = state.cwd,
+    rev = state.rev,
+    restore = {
+      line = line,
+      hash = item and item.hash or nil,
+    },
+  }
+end
+
+local function restore_cursor(state)
+  local restore = state.restore
+  if not restore or state.restore_done or not state.winid or not vim.api.nvim_win_is_valid(state.winid) then
+    return
+  end
+  if #state.items == 0 then
+    return
+  end
+
+  local line = restore.line or 1
+  if restore.hash then
+    for i, item in ipairs(state.items) do
+      if item.hash == restore.hash then
+        line = i
+        break
+      end
+    end
+  end
+
+  line = math.max(1, math.min(line, #state.items))
+  vim.api.nvim_win_set_cursor(state.winid, { line, 0 })
+  state.restore_done = true
 end
 
 local function should_prefetch(state)
@@ -158,6 +196,7 @@ local function fetch_more(state, force)
     vim.list_extend(state.items, payload.items)
     state.eof = payload.eof
     render.render_lines(state, start_idx)
+    restore_cursor(state)
     render.update_selected_line(state)
     render.update_winbar(state)
   end)
@@ -186,6 +225,7 @@ local function attach_autocmds(state)
       fetch_more(state, false)
       render.update_selected_line(state)
       render.update_winbar(state)
+      session.update(state)
     end,
   })
 
@@ -193,6 +233,7 @@ local function attach_autocmds(state)
     group = group,
     buffer = state.bufnr,
     callback = function()
+      session.clear(state)
       state_by_buf[state.bufnr] = nil
       pcall(vim.api.nvim_del_augroup_by_id, group)
     end,
@@ -230,9 +271,7 @@ end
 local function set_keymaps(state)
   local opts = { buffer = state.bufnr, nowait = true, silent = true }
   vim.keymap.set('n', config.options.keymaps.close, function()
-    if vim.api.nvim_win_is_valid(state.winid) then
-      vim.api.nvim_win_close(state.winid, true)
-    end
+    session.close_active()
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.refresh, function()
@@ -315,6 +354,8 @@ function M.open(opts)
     loading = false,
     loading_row = nil,
     total_count = nil,
+    restore = opts.restore,
+    restore_done = false,
     preview = {
       anchor_winid = target_winid,
       extra_wins = {},
@@ -323,10 +364,22 @@ function M.open(opts)
   }
 
   state_by_buf[bufnr] = state
+  session.register(state, snapshot)
   attach_autocmds(state)
   set_keymaps(state)
   render.update_winbar(state)
   refresh(state)
+end
+
+function M.activate(bufnr, winid)
+  local state = state_by_buf[bufnr]
+  if not state then
+    return
+  end
+  state.winid = winid or state.winid
+  session.register(state, snapshot)
+  render.update_selected_line(state)
+  render.update_winbar(state)
 end
 
 return M
