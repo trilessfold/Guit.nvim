@@ -258,6 +258,7 @@ local function open_show_from_log(state)
     source_log = {
       bufnr = state.bufnr,
       line = line,
+      snapshot = snapshot(state),
     },
     preview = state.preview,
   })
@@ -339,7 +340,17 @@ function M.open(opts)
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].readonly = true
 
-  local winid, target_winid = window.open_bottom_pane(bufnr)
+  local winid, target_winid
+  if opts.reuse_winid and vim.api.nvim_win_is_valid(opts.reuse_winid) then
+    winid = opts.reuse_winid
+    target_winid = opts.target_winid or vim.api.nvim_get_current_win()
+    ui_util.with_winfixbuf_disabled(winid, function()
+      vim.api.nvim_win_set_buf(winid, bufnr)
+    end)
+    vim.api.nvim_set_current_win(winid)
+  else
+    winid, target_winid = window.open_bottom_pane(bufnr)
+  end
 
   local state = {
     bufnr = bufnr,
@@ -356,7 +367,7 @@ function M.open(opts)
     total_count = nil,
     restore = opts.restore,
     restore_done = false,
-    preview = {
+    preview = opts.preview or {
       anchor_winid = target_winid,
       extra_wins = {},
       buffers = {},

@@ -61,24 +61,34 @@ function M.close_active()
   return true
 end
 
-local function restore_log(snapshot)
+local function restore_log(snapshot, opts)
+  opts = opts or {}
   require('guit.ui.buffer').open({
     cwd = snapshot.cwd,
     rev = snapshot.rev,
     restore = snapshot.restore,
+    reuse_winid = opts.reuse_winid,
+    target_winid = opts.target_winid,
+    preview = opts.preview,
   })
 end
 
-local function restore_show(snapshot)
+local function restore_show(snapshot, opts)
+  opts = opts or {}
   require('guit.ui.show_buffer').open({
     cwd = snapshot.cwd,
     commit = snapshot.commit,
     view_mode = snapshot.view_mode,
+    source_log = snapshot.source_log,
     restore = snapshot.restore,
+    reuse_winid = opts.reuse_winid,
+    target_winid = opts.target_winid,
+    preview = opts.preview,
   })
 end
 
-local function restore_history(snapshot)
+local function restore_history(snapshot, opts)
+  opts = opts or {}
   require('guit.ui.history_buffer').open({
     cwd = snapshot.cwd,
     path = snapshot.path,
@@ -86,17 +96,36 @@ local function restore_history(snapshot)
     rev = snapshot.rev,
     is_file = snapshot.is_file,
     restore = snapshot.restore,
+    reuse_winid = opts.reuse_winid,
+    target_winid = opts.target_winid,
+    preview = opts.preview,
   })
 end
 
-local function restore_compare(snapshot)
+local function restore_compare(snapshot, opts)
+  opts = opts or {}
   require('guit.ui.compare_buffer').open({
     cwd = snapshot.cwd,
     left = snapshot.left,
     right = snapshot.right,
     view_mode = snapshot.view_mode,
     restore = snapshot.restore,
+    reuse_winid = opts.reuse_winid,
+    target_winid = opts.target_winid,
+    preview = opts.preview,
   })
+end
+
+function M.open_snapshot(snapshot, opts)
+  if snapshot.kind == 'log' then
+    restore_log(snapshot, opts)
+  elseif snapshot.kind == 'show' then
+    restore_show(snapshot, opts)
+  elseif snapshot.kind == 'history' then
+    restore_history(snapshot, opts)
+  elseif snapshot.kind == 'compare' then
+    restore_compare(snapshot, opts)
+  end
 end
 
 function M.restore(default_open)
@@ -113,14 +142,8 @@ function M.restore(default_open)
     return false
   end
 
-  if snapshot.kind == 'log' then
-    restore_log(snapshot)
-  elseif snapshot.kind == 'show' then
-    restore_show(snapshot)
-  elseif snapshot.kind == 'history' then
-    restore_history(snapshot)
-  elseif snapshot.kind == 'compare' then
-    restore_compare(snapshot)
+  if snapshot.kind == 'log' or snapshot.kind == 'show' or snapshot.kind == 'history' or snapshot.kind == 'compare' then
+    M.open_snapshot(snapshot)
   elseif default_open then
     default_open()
   end

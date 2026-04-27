@@ -22,13 +22,27 @@ end
 
 local function return_to_log(state)
   local origin = state.source_log
-  if not origin or not origin.bufnr or not vim.api.nvim_buf_is_valid(origin.bufnr) then
+  if not origin then
     vim.notify('guit.nvim: original Guit log buffer is no longer available', vim.log.levels.WARN)
     return
   end
 
   local winid = state.winid
   if not winid or not vim.api.nvim_win_is_valid(winid) then
+    return
+  end
+
+  if not origin.bufnr or not vim.api.nvim_buf_is_valid(origin.bufnr) then
+    if origin.snapshot then
+      session.open_snapshot(origin.snapshot, {
+        reuse_winid = winid,
+        target_winid = state.target_winid,
+        preview = state.preview,
+      })
+      return
+    end
+
+    vim.notify('guit.nvim: original Guit log buffer is no longer available', vim.log.levels.WARN)
     return
   end
 
@@ -101,11 +115,17 @@ end
 
 local function snapshot(state)
   local entry, idx = current_entry(state)
+  local source_log = state.source_log and {
+    bufnr = state.source_log.bufnr,
+    line = state.source_log.line,
+    snapshot = state.source_log.snapshot,
+  } or nil
   return {
     kind = 'show',
     cwd = state.cwd,
     commit = state.commit,
     view_mode = state.view_mode,
+    source_log = source_log,
     restore = {
       line = idx,
       path = entry and entry.full_path or nil,

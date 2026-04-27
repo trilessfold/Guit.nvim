@@ -262,7 +262,7 @@ local function open_show_from_history(state)
     commit = item.hash,
     reuse_winid = state.winid,
     target_winid = state.target_winid,
-    source_log = { bufnr = state.bufnr, line = line },
+    source_log = { bufnr = state.bufnr, line = line, snapshot = snapshot(state) },
     preview = state.preview,
   })
 
