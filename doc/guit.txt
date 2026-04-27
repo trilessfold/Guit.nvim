@@ -13,6 +13,9 @@ COMMANDS                                                *guit-commands*
     Press <CR> on a file to open the file at that commit and run
     :Gdiffsplit against the parent commit in Fugitive.
 
+:Guit show %
+    From a Fugitive object buffer, open changed files for that object's commit.
+
 :Guit compare <left_rev> <right_rev>
     Compare two revisions (branches, tags, or commit hashes) in a bottom split.
     Accepts either two arguments or a single range like left..right.

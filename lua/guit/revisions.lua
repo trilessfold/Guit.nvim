@@ -90,7 +90,13 @@ function M.complete(arglead, cmdline, cwd)
   end
 
   local sub = parts[2]
-  if sub == 'show' or sub == 'log' then
+  if sub == 'show' then
+    local items = M.complete_refs(arglead, cwd)
+    if arglead == '' or vim.startswith('%', arglead) then
+      table.insert(items, 1, '%')
+    end
+    return items
+  elseif sub == 'log' then
     return M.complete_refs(arglead, cwd)
   elseif sub == 'history' then
     local items = vim.fn.getcompletion(arglead, 'file')

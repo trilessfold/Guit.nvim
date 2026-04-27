@@ -34,6 +34,7 @@ require('guit').setup({
 
 - `:Guit log [rev]`
 - `:Guit show <rev>`
+- `:Guit show %` from a Fugitive object buffer opens that object's commit.
 
 ## Keymaps
 

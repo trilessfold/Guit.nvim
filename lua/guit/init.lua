@@ -4,6 +4,7 @@ local buffer = require('guit.ui.buffer')
 local show_buffer = require('guit.ui.show_buffer')
 local compare_buffer = require('guit.ui.compare_buffer')
 local history_buffer = require('guit.ui.history_buffer')
+local fugitive = require('guit.fugitive')
 
 local M = {}
 
@@ -45,7 +46,17 @@ function M.show(commit, opts)
     return
   end
 
-  local cwd = (opts and opts.cwd) or vim.uv.cwd()
+  local source = nil
+  if commit == '%' then
+    source = fugitive.from_buffer(0)
+    if not source or not source.commit then
+      vim.notify('guit.nvim: current buffer is not a fugitive commit object', vim.log.levels.WARN)
+      return
+    end
+    commit = source.commit
+  end
+
+  local cwd = (opts and opts.cwd) or (source and source.cwd) or vim.uv.cwd()
   local repo, err = git.repo_root(cwd)
   if not repo then
     vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
