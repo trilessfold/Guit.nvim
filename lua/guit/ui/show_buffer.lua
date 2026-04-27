@@ -222,7 +222,10 @@ local function open_file_diff(state, entry, keep_focus)
 
   local ok, err = preview.with_managed_preview(state, function()
     vim.cmd(('Gedit %s:%s'):format(state.commit, vim.fn.fnameescape(entry.full_path)))
-    vim.cmd(('Gdiffsplit! %s'):format(changed_files.parent_of(state.commit)))
+    vim.cmd(('Gdiffsplit! %s:%s'):format(
+      changed_files.parent_of(state.commit),
+      vim.fn.fnameescape(entry.old_path or entry.full_path)
+    ))
   end)
   if not ok then
     vim.notify('guit.nvim: failed to open file diff in fugitive: ' .. tostring(err), vim.log.levels.ERROR)

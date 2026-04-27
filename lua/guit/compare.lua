@@ -34,6 +34,11 @@ local function parse_numstat(output)
       local additions = tonumber(add_s) or 0
       local deletions = tonumber(del_s) or 0
       stats[path] = { additions = additions, deletions = deletions }
+      local prefix, old_name, new_name, suffix = path:match('^(.-){(.-)%s+=>%s+(.-)}(.*)$')
+      if old_name and new_name then
+        stats[prefix .. old_name .. suffix] = stats[path]
+        stats[prefix .. new_name .. suffix] = stats[path]
+      end
       total.additions = total.additions + additions
       total.deletions = total.deletions + deletions
     end
