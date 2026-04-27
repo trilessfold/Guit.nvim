@@ -77,9 +77,9 @@ local function open_commit(state, commit, opts)
   end
 end
 
-local function open_file_diff_for_history(state, commit, keep_focus)
+local function open_file_diff_for_history(state, item, keep_focus)
   if not state.is_file then
-    open_commit(state, commit, { keep_focus = keep_focus })
+    open_commit(state, item.hash, { keep_focus = keep_focus })
     return
   end
 
@@ -88,9 +88,13 @@ local function open_file_diff_for_history(state, commit, keep_focus)
     return
   end
 
+  local commit = item.hash
+  local path = item.path or state.path
+  local parent_path = item.old_path or path
+
   local ok, err = preview.with_managed_preview(state, function()
-    vim.cmd(('Gedit %s^:%s'):format(commit, vim.fn.fnameescape(state.path)))
-    vim.cmd(('Gdiffsplit! %s:%s'):format(commit, vim.fn.fnameescape(state.path)))
+    vim.cmd(('Gedit %s:%s'):format(commit, vim.fn.fnameescape(path)))
+    vim.cmd(('Gdiffsplit! %s^:%s'):format(commit, vim.fn.fnameescape(parent_path)))
   end)
   if not ok then
     vim.notify('guit.nvim: failed to open file diff in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
@@ -106,11 +110,11 @@ local function open_file_diff_for_history(state, commit, keep_focus)
   end
 end
 
-local function open_primary(state, commit, keep_focus)
+local function open_primary(state, item, keep_focus)
   if state.is_file then
-    open_file_diff_for_history(state, commit, keep_focus)
+    open_file_diff_for_history(state, item, keep_focus)
   else
-    open_commit(state, commit, { keep_focus = keep_focus })
+    open_commit(state, item.hash, { keep_focus = keep_focus })
   end
 end
 
@@ -221,11 +225,11 @@ local function set_keymaps(state)
   vim.keymap.set('n', config.options.keymaps.refresh, function() refresh(state) end, opts)
   vim.keymap.set('n', config.options.keymaps.open, function()
     local item = get_current_item(state)
-    if item then open_primary(state, item.hash, true) end
+    if item then open_primary(state, item, true) end
   end, opts)
   vim.keymap.set('n', config.options.keymaps.split, function()
     local item = get_current_item(state)
-    if item then open_primary(state, item.hash, false) end
+    if item then open_primary(state, item, false) end
   end, opts)
   vim.keymap.set('n', config.options.keymaps.commit, function()
     local item = get_current_item(state)

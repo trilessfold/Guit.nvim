@@ -43,12 +43,25 @@ local function counts_text(item)
   return fit_display(counts_raw(item), 14)
 end
 
+local function status_label(item)
+  local status = item.status or ''
+  if status == '' then
+    return ''
+  end
+
+  local code = status:sub(1, 1)
+  if (code == 'R' or code == 'C') and item.old_path and item.path then
+    return string.format('[%s %s -> %s] ', code, item.old_path, item.path)
+  end
+  return string.format('[%s] ', code)
+end
+
 function M.format_item(item)
   local hash = fit_display(item.short_hash, 10)
   local date = fit_display(item.date, 16)
   local author = fit_display(item.author, 20)
   local counts = counts_text(item)
-  local subject = item.subject or ''
+  local subject = status_label(item) .. (item.subject or '')
 
   local sep = '  '
   local segments = { hash, sep, date, sep, author, sep, counts, sep, subject }

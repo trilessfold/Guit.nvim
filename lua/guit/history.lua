@@ -5,14 +5,6 @@ local M = {}
 local SEP = '\31'
 local REC = '\30'
 
-local function parse_shortstat_line(line)
-  line = line or ''
-  local files = tonumber((line:match('(%d+)%s+files?%s+changed'))) or 0
-  local additions = tonumber((line:match('(%d+)%s+insertions?%(%+%)'))) or 0
-  local deletions = tonumber((line:match('(%d+)%s+deletions?%(%-%)'))) or 0
-  return files, additions, deletions
-end
-
 local function parse_log_items(output)
   local items = {}
   for _, block in ipairs(vim.split(output or '', REC, { plain = true, trimempty = true })) do
@@ -37,7 +29,28 @@ local function parse_log_items(output)
   return items
 end
 
-local function parse_show_stats(output)
+local function expand_brace_path(path)
+  local prefix, old_name, new_name, suffix = path:match('^(.-){(.-)%s+=>%s+(.-)}(.*)$')
+  if old_name and new_name then
+    return prefix .. old_name .. suffix, prefix .. new_name .. suffix
+  end
+  return nil, nil
+end
+
+local function path_matches(candidate, path)
+  return candidate == path or vim.startswith(candidate, path .. '/')
+end
+
+local function numstat_matches_path(numstat_path, path)
+  if path_matches(numstat_path, path) then
+    return true
+  end
+
+  local old_path, new_path = expand_brace_path(numstat_path)
+  return (old_path and path_matches(old_path, path)) or (new_path and path_matches(new_path, path)) or false
+end
+
+local function parse_show_stats(output, path)
   local stats = {}
   local current_hash = nil
 
@@ -48,19 +61,44 @@ local function parse_show_stats(output)
       if current_hash and not stats[current_hash] then
         stats[current_hash] = { files_changed = 0, additions = 0, deletions = 0 }
       end
-    elseif current_hash and line:find('changed', 1, true) then
-      local f, a, d = parse_shortstat_line(line)
-      if f > 0 or a > 0 or d > 0 then
-        stats[current_hash] = {
-          files_changed = f,
-          additions = a,
-          deletions = d,
-        }
+    elseif current_hash then
+      local add_s, del_s, numstat_path = line:match('^(%S+)\t(%S+)\t(.+)$')
+      if add_s and del_s and numstat_path and numstat_matches_path(numstat_path, path) then
+        local stat = stats[current_hash]
+        stat.files_changed = stat.files_changed + 1
+        stat.additions = stat.additions + (tonumber(add_s) or 0)
+        stat.deletions = stat.deletions + (tonumber(del_s) or 0)
       end
     end
   end
 
   return stats
+end
+
+local function parse_path_changes(output, path)
+  local changes = {}
+  local current_hash = nil
+
+  for _, raw in ipairs(vim.split(output or '', '\n', { plain = true, trimempty = false })) do
+    local line = raw or ''
+    if vim.startswith(line, REC) then
+      current_hash = line:sub(#REC + 1):match('^([0-9a-fA-F]+)')
+    elseif current_hash and line ~= '' then
+      local status, rest = line:match('^(%S+)%s+(.+)$')
+      if status and rest then
+        if status:match('^R%d+$') or status:match('^C%d+$') then
+          local old_path, new_path = rest:match('^(.-)%s+(.+)$')
+          if old_path and new_path and (new_path == path or old_path == path) then
+            changes[current_hash] = { status = status, path = new_path, old_path = old_path }
+          end
+        elseif rest == path then
+          changes[current_hash] = { status = status, path = rest }
+        end
+      end
+    end
+  end
+
+  return changes
 end
 
 local function fetch_commit_stats(cwd, path, hashes, on_done)
@@ -69,20 +107,52 @@ local function fetch_commit_stats(cwd, path, hashes, on_done)
     return
   end
 
-  local args = { 'git', '--no-pager', 'show', '--shortstat', '--format=' .. REC .. '%H', '--color=never' }
+  local args = {
+    'git',
+    '--no-pager',
+    'show',
+    '--numstat',
+    '--find-renames',
+    '--format=' .. REC .. '%H',
+    '--color=never',
+  }
   vim.list_extend(args, hashes)
-  if path and path ~= '' then
-    args[#args + 1] = '--'
-    args[#args + 1] = path
-  end
 
   vim.system(args, { cwd = cwd, text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
-        on_done(nil, (result.stderr or result.stdout or 'git show --shortstat failed'):gsub('%s+$', ''))
+        on_done(nil, (result.stderr or result.stdout or 'git show --numstat failed'):gsub('%s+$', ''))
         return
       end
-      on_done(parse_show_stats(result.stdout))
+      on_done(parse_show_stats(result.stdout, path))
+    end)
+  end)
+end
+
+local function fetch_commit_path_changes(cwd, path, hashes, on_done)
+  if not hashes or #hashes == 0 then
+    on_done({})
+    return
+  end
+
+  local args = {
+    'git',
+    '--no-pager',
+    'show',
+    '--name-status',
+    '--find-renames',
+    '--format=' .. REC .. '%H',
+    '--color=never',
+  }
+  vim.list_extend(args, hashes)
+
+  vim.system(args, { cwd = cwd, text = true }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        on_done(nil, (result.stderr or result.stdout or 'git show --name-status failed'):gsub('%s+$', ''))
+        return
+      end
+      on_done(parse_path_changes(result.stdout, path))
     end)
   end)
 end
@@ -150,16 +220,30 @@ function M.fetch_page(opts, on_done)
           return
         end
 
-        for _, item in ipairs(items) do
-          local st = stats[item.hash]
-          if st then
-            item.files_changed = st.files_changed or 0
-            item.additions = st.additions or 0
-            item.deletions = st.deletions or 0
+        fetch_commit_path_changes(opts.cwd, opts.path, hashes, function(changes, changes_err)
+          if changes_err then
+            on_done(nil, changes_err)
+            return
           end
-        end
 
-        on_done({ items = items, eof = #items < opts.limit })
+          for _, item in ipairs(items) do
+            local st = stats[item.hash]
+            if st then
+              item.files_changed = st.files_changed or 0
+              item.additions = st.additions or 0
+              item.deletions = st.deletions or 0
+            end
+
+            local change = changes[item.hash]
+            if change then
+              item.status = change.status
+              item.path = change.path
+              item.old_path = change.old_path
+            end
+          end
+
+          on_done({ items = items, eof = #items < opts.limit })
+        end)
       end)
     end)
   end)
