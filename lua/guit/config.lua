@@ -32,6 +32,10 @@ M.defaults = {
     default_view = 'tree',
     show_counts = true,
   },
+  blame = {
+    mode = 'color', -- color | plain | heat
+    width = 48,
+  },
   git = {
     pretty = table.concat({
       '%H',

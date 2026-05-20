@@ -1,3 +1,4 @@
+:Guit-blame	guit.txt	/*:Guit-blame*
 :Guit-compare	guit.txt	/*:Guit-compare*
 :Guit-history	guit.txt	/*:Guit-history*
 :Guit-history-percent	guit.txt	/*:Guit-history-percent*
@@ -6,6 +7,7 @@
 :Guit-show-percent	guit.txt	/*:Guit-show-percent*
 :Guit-toggle	guit.txt	/*:Guit-toggle*
 guit	guit.txt	/*guit*
+guit-blame	guit.txt	/*guit-blame*
 guit-commands	guit.txt	/*guit-commands*
 guit-compare	guit.txt	/*guit-compare*
 guit-config	guit.txt	/*guit-config*

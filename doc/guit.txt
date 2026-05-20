@@ -29,6 +29,11 @@ COMMANDS                                                *guit-commands*
     Fugitive object buffer, use that object's file path and start history at
     that object's commit.
 
+:Guit blame                                             *:Guit-blame*
+    Open block-based blame for the current file in a left split. The blame pane
+    is scroll-bound and cursor-bound to the target file window. While open, it
+    follows the focused normal file or Fugitive file object buffer.
+
 :Guit compare <left_rev> <right_rev>                     *:Guit-compare*
     Compare two revisions (branches, tags, or commit hashes) in a bottom split.
     Accepts either two arguments or a single range like left..right.
@@ -170,6 +175,52 @@ For renamed files, file diffs use the old path on the parent side and the new
 path on the selected commit side.
 
 ===============================================================================
+BLAME BUFFER                                            *guit-blame*
+
+The blame buffer is read-only and opens as a narrow vertical split to the left
+of the target file. It renders blame by consecutive commit blocks rather than
+repeating full metadata on every line.
+
+The first line of each block shows:
+    short hash
+    author
+    summary
+    author date
+
+Following lines in the same block show a continuation marker.
+
+The blame and target windows use 'scrollbind' and 'cursorbind' so scrolling or
+moving in either window keeps the other aligned. Focusing another normal file
+or Fugitive file object retargets the blame pane to that buffer.
+
+Keys:
+    <CR>    Open the file at the blamed revision in the target window without
+            closing the blame pane.
+    <C-o>   Restore the previous target buffer opened before blame <CR>.
+    c       Open the blamed commit in Fugitive and keep focus in blame.
+    C       Open the blamed commit in Fugitive and move focus to target.
+    s       Open |:Guit-show| for the blamed commit.
+    t       Cycle blame mode.
+    q       Close the blame pane.
+    ?       Show a short in-editor help message.
+
+Blame modes preserve the normal window background and color the hash plus block
+marker:
+    color   Give each commit hash a stable color.
+    plain   Use regular Guit hash styling.
+    heat    Color older-to-newer lines from cool to warm.
+
+Configure the default mode and width with:
+>lua
+  require('guit').setup({
+    blame = {
+      mode = 'color', -- color | plain | heat
+      width = 48,
+    },
+  })
+<
+
+===============================================================================
 TOGGLE SESSION                                          *guit-toggle*
 
 |:Guit-toggle| closes the active Guit pane if one is open. Closing stores a
@@ -195,6 +246,10 @@ CONFIGURATION                                           *guit-config*
     show = {
       default_view = 'tree',
       show_counts = true,
+    },
+    blame = {
+      mode = 'color',
+      width = 48,
     },
     keymaps = {
       open_show = 's',
