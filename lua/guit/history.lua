@@ -29,6 +29,32 @@ local function parse_log_items(output)
   return items
 end
 
+local function parse_line_log_items(output)
+  local items = {}
+  for _, block in ipairs(vim.split(output or '', REC, { plain = true, trimempty = true })) do
+    local line = (block:gsub('^\n+', '')):match('([^\n]+)')
+    if line and line ~= '' then
+      local meta = vim.split(line, SEP, { plain = true })
+      if #meta >= 6 then
+        local _, plus_start = block:match('\n@@ %-(%d+),?%d* %+(%d+),?%d* @@')
+        items[#items + 1] = {
+          hash = meta[1],
+          short_hash = meta[2],
+          author = meta[3],
+          date = meta[4],
+          refs = meta[5],
+          subject = meta[6],
+          files_changed = 0,
+          additions = 0,
+          deletions = 0,
+          target_line = tonumber(plus_start),
+        }
+      end
+    end
+  end
+  return items
+end
+
 local function expand_brace_path(path)
   local prefix, old_name, new_name, suffix = path:match('^(.-){(.-)%s+=>%s+(.-)}(.*)$')
   if old_name and new_name then
@@ -205,7 +231,6 @@ function M.fetch_page(opts, on_done)
     vim.list_extend(args, {
       ('-L%d,%d:%s'):format(opts.line_range.start, opts.line_range.finish, opts.path),
       opts.rev or 'HEAD',
-      '--no-patch',
     })
   else
     vim.list_extend(args, {
@@ -221,8 +246,8 @@ function M.fetch_page(opts, on_done)
         return
       end
 
-      local items = parse_log_items(result.stdout)
       if opts.line_range then
+        local items = parse_line_log_items(result.stdout)
         for _, item in ipairs(items) do
           item.path = opts.path
           item.hide_stats = true
@@ -231,6 +256,7 @@ function M.fetch_page(opts, on_done)
         return
       end
 
+      local items = parse_log_items(result.stdout)
       local hashes = {}
       for _, item in ipairs(items) do
         hashes[#hashes + 1] = item.hash

@@ -173,9 +173,10 @@ local function open_file_revision_for_history(state, item, keep_focus)
   local path = item.path or state.path
   local ok, err = preview.with_managed_preview(state, function()
     vim.cmd(('Gedit %s:%s'):format(item.hash, vim.fn.fnameescape(path)))
-    if state.line_range then
+    local target_line = item.target_line or (state.line_range and state.line_range.start)
+    if target_line then
       local max_line = vim.api.nvim_buf_line_count(0)
-      local line = math.max(1, math.min(state.line_range.start, max_line))
+      local line = math.max(1, math.min(target_line, max_line))
       pcall(vim.api.nvim_win_set_cursor, 0, { line, 0 })
     end
   end)
