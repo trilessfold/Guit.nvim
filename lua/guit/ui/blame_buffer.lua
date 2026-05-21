@@ -188,6 +188,53 @@ local function marker_hl(state, item)
   return hl_name('Block', hash_color_index(item.hash))
 end
 
+local function target_diff_fillers(state)
+  if not valid_win(state.target_winid) or not valid_buf(state.target_bufnr) then
+    return {}
+  end
+
+  local current = vim.api.nvim_get_current_win()
+  local fillers = {}
+  vim.api.nvim_set_current_win(state.target_winid)
+  for lnum = 1, line_count(state.target_bufnr) do
+    local count = vim.fn.diff_filler(lnum)
+    if count and count > 0 then
+      fillers[lnum] = count
+    end
+  end
+  if valid_win(current) then
+    vim.api.nvim_set_current_win(current)
+  end
+  return fillers
+end
+
+local function add_diff_fillers(state)
+  local fillers = target_diff_fillers(state)
+  for lnum, count in pairs(fillers) do
+    local virt_lines = {}
+    for _ = 1, count do
+      virt_lines[#virt_lines + 1] = { { ' ', 'Normal' } }
+    end
+    vim.api.nvim_buf_set_extmark(state.bufnr, state.ns, lnum - 1, 0, {
+      virt_lines = virt_lines,
+      virt_lines_above = true,
+      virt_lines_leftcol = true,
+      priority = 1,
+    })
+  end
+end
+
+local function with_eventignore_all(fn)
+  local eventignore = vim.o.eventignore
+  vim.o.eventignore = 'all'
+  local ok, result = pcall(fn)
+  vim.o.eventignore = eventignore
+  if not ok then
+    error(result)
+  end
+  return result
+end
+
 local function render(state)
   local out = {}
   local max_lines = math.max(#state.items, line_count(state.target_bufnr))
@@ -215,6 +262,8 @@ local function render(state)
       vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, group, row - 1, 4, math.min(#line, 12))
     end
   end
+
+  add_diff_fillers(state)
 end
 
 local function current_item(state)
@@ -235,7 +284,9 @@ local function open_in_target(state, fn)
   end
   local current = vim.api.nvim_get_current_win()
   vim.api.nvim_set_current_win(state.target_winid)
+  state.suspend_follow = true
   local ok, err = pcall(fn)
+  state.suspend_follow = false
   if valid_win(current) then
     vim.api.nvim_set_current_win(current)
   end
@@ -322,6 +373,7 @@ local function jump_target_back(state)
   local return_winid = valid_win(state.winid) and state.winid or vim.api.nvim_get_current_win()
   vim.api.nvim_set_current_win(state.target_winid)
   state.restoring_target = true
+  state.suspend_follow = true
   local ok, err = pcall(function()
     if valid_buf(snapshot.bufnr) then
       vim.api.nvim_win_set_buf(state.target_winid, snapshot.bufnr)
@@ -334,6 +386,7 @@ local function jump_target_back(state)
       pcall(vim.fn.winrestview, snapshot.view)
     end
   end)
+  state.suspend_follow = false
   state.restoring_target = false
   if valid_win(return_winid) then
     vim.api.nvim_set_current_win(return_winid)
@@ -363,7 +416,7 @@ local function open_file_revision(state)
   end
   local snapshot = target_snapshot(state)
   local target_line = item.original_line or item.line
-  open_in_target(state, function()
+  local opened = open_in_target(state, function()
     vim.cmd(('Gedit %s:%s'):format(item.hash, vim.fn.fnameescape(item.filename or state.path)))
     if target_line then
       local max_line = vim.api.nvim_buf_line_count(0)
@@ -382,6 +435,12 @@ local function open_file_revision(state)
       })
     end
   end)
+  if opened then
+    local target = resolve_target(state.target_winid)
+    if target then
+      set_target(state, target, { silent = true })
+    end
+  end
 end
 
 local function open_commit(state, keep_focus)
@@ -621,6 +680,9 @@ local function attach_autocmds(state)
       if state.restoring_target then
         return
       end
+      if state.suspend_follow then
+        return
+      end
       if window.is_opening_pane() then
         return
       end
@@ -652,9 +714,36 @@ end
 
 local function open_window(state)
   local target_winid = vim.api.nvim_get_current_win()
-  vim.cmd(('topleft vertical %dsplit'):format(config.options.blame.width))
-  local winid = vim.api.nvim_get_current_win()
-  vim.api.nvim_win_set_buf(winid, state.bufnr)
+  local winid
+  local ok = pcall(function()
+    with_eventignore_all(function()
+      winid = vim.api.nvim_open_win(state.bufnr, true, {
+        win = target_winid,
+        split = 'left',
+        width = config.options.blame.width,
+      })
+    end)
+  end)
+
+  if not ok or not valid_win(winid) then
+    local err
+    ok, err = pcall(function()
+      with_eventignore_all(function()
+        vim.cmd(('topleft vertical %dsplit'):format(config.options.blame.width))
+        winid = vim.api.nvim_get_current_win()
+        ui_util.with_winfixbuf_disabled(winid, function()
+          vim.api.nvim_win_set_buf(winid, state.bufnr)
+        end)
+      end)
+    end)
+    if not ok then
+      error(err)
+    end
+  end
+
+  if vim.api.nvim_win_get_buf(winid) ~= state.bufnr then
+    error('failed to open Guit blame buffer')
+  end
 
   vim.wo[winid].number = false
   vim.wo[winid].relativenumber = false
@@ -664,6 +753,7 @@ local function open_window(state)
   vim.wo[winid].foldenable = false
   vim.wo[winid].wrap = false
   vim.wo[winid].winfixwidth = true
+  vim.wo[winid].winfixbuf = true
   vim.wo[winid].scrollbind = true
   vim.wo[winid].cursorbind = true
   vim.wo[winid].cursorline = true
