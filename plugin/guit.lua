@@ -19,9 +19,10 @@ vim.api.nvim_create_autocmd('ColorScheme', {
 })
 
 vim.api.nvim_create_user_command('Guit', function(opts)
-  require('guit').command(opts.fargs)
+  require('guit').command(opts.fargs, opts)
 end, {
   nargs = '*',
+  range = true,
   complete = function(arglead, cmdline, _)
     return require('guit.revisions').complete(arglead, cmdline, vim.uv.cwd())
   end,

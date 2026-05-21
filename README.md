@@ -6,7 +6,7 @@ A lightweight Git log and commit browser for Neovim, built as a thin layer on to
 
 - `:Guit log [rev]` opens a paged git log in a bottom pane
 - `:Guit show <commit>` opens changed files for a commit in a bottom pane
-- `:Guit history <path>` opens file or directory history in a bottom pane
+- `:Guit history <path>` opens file, directory, or selected-line history in a bottom pane
 - `:Guit compare <left> <right>` compares two revisions in a bottom pane
 - `:Guit blame` opens block-based blame in a left pane and follows the focused file window
 - `:Guit toggle` closes and restores the last Guit pane
@@ -47,6 +47,7 @@ require('guit').setup({
 - `:Guit show %`
 - `:Guit history <file-or-directory>`
 - `:Guit history %`
+- `:'<,'>Guit history`
 - `:Guit compare <left_rev> <right_rev>`
 - `:Guit compare <left_rev>..<right_rev>`
 - `:Guit blame`
@@ -169,8 +170,12 @@ Changed-file statuses are color-coded in tree and list views:
 ```vim
 :Guit history <file-or-directory>
 :Guit history %
+:'<,'>Guit history
+:'<,'>Guit history %
 ```
 
 Shows commits that touched the given file or directory in a lower pane. The compact stats column uses `<files>f <additions> <deletions>`.
 
 For file history, `<CR>` opens the file diff for the selected commit. Rename commits use the old path on the parent side and the new path on the commit side. History rows include a file-action prefix such as `[M]`, `[A]`, or `[R old/path -> new/path]`.
+
+With a command range, `Guit history` opens line history for the selected lines in the current file. Line history reuses the same history pane and keymaps, omits the compact stats column, and `<CR>` opens the file revision for the selected commit.

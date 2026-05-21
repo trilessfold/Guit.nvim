@@ -29,6 +29,12 @@ COMMANDS                                                *guit-commands*
     Fugitive object buffer, use that object's file path and start history at
     that object's commit.
 
+:[range]Guit history                                     *:Guit-history-range*
+:[range]Guit history %
+    Open line history for [range] in the current file. The history pane is
+    reused, but the compact stats column is omitted. Pressing <CR> opens the
+    file revision for the selected commit.
+
 :Guit blame                                             *:Guit-blame*
     Open block-based blame for the current file in a left split. The blame pane
     is scroll-bound and cursor-bound to the target file window. While open, it
@@ -149,8 +155,10 @@ Keys:
 
     <CR>    For file history: open the file diff for the selected commit and
             keep focus in history. For directory history: open the selected
-            commit in the target window.
-    o       Open the file diff or commit and move focus to the target window.
+            commit in the target window. For line history: open the file
+            revision for the selected commit.
+    o       Open the file diff, file revision, or commit and move focus to the
+            target window.
     c       Open the selected commit in Fugitive and keep focus in history.
     C       Open the selected commit in Fugitive and move focus to target.
     s       Open |:Guit-show| for the selected commit in the same lower pane.

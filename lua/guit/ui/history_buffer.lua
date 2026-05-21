@@ -48,6 +48,8 @@ local function snapshot(state)
     path_display = state.path_display,
     rev = state.rev,
     is_file = state.is_file,
+    line_range = state.line_range,
+    hide_stats = state.hide_stats,
     restore = {
       line = line or restore.line,
       hash = item and item.hash or restore.hash,
@@ -162,8 +164,39 @@ local function open_file_diff_for_history(state, item, keep_focus)
   end
 end
 
+local function open_file_revision_for_history(state, item, keep_focus)
+  if vim.fn.exists(':Gedit') ~= 2 then
+    vim.notify('guit.nvim: fugitive not found (:Gedit unavailable)', vim.log.levels.ERROR)
+    return
+  end
+
+  local path = item.path or state.path
+  local ok, err = preview.with_managed_preview(state, function()
+    vim.cmd(('Gedit %s:%s'):format(item.hash, vim.fn.fnameescape(path)))
+    if state.line_range then
+      local max_line = vim.api.nvim_buf_line_count(0)
+      local line = math.max(1, math.min(state.line_range.start, max_line))
+      pcall(vim.api.nvim_win_set_cursor, 0, { line, 0 })
+    end
+  end)
+  if not ok then
+    vim.notify('guit.nvim: failed to open file revision in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
+    if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
+      vim.api.nvim_set_current_win(state.winid)
+    end
+    return
+  end
+  bind_back_navigation(state, vim.api.nvim_get_current_buf())
+
+  if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
+    vim.api.nvim_set_current_win(state.winid)
+  end
+end
+
 local function open_primary(state, item, keep_focus)
-  if state.is_file then
+  if state.line_range then
+    open_file_revision_for_history(state, item, keep_focus)
+  elseif state.is_file then
     open_file_diff_for_history(state, item, keep_focus)
   else
     open_commit(state, item.hash, { keep_focus = keep_focus })
@@ -171,6 +204,9 @@ local function open_primary(state, item, keep_focus)
 end
 
 local function fetch_total_count(state)
+  if state.line_range then
+    return
+  end
   history.fetch_total_count({ cwd = state.cwd, path = state.path, rev = state.rev }, function(count, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
     if err then
@@ -187,13 +223,14 @@ local function fetch_more(state, force)
   if not force and not should_prefetch(state) then return end
 
   state.loading = true
-  render.set_loading_line(state, '… loading file history …')
+  render.set_loading_line(state, state.line_range and '… loading line history …' or '… loading file history …')
   render.update_winbar(state)
 
   history.fetch_page({
     cwd = state.cwd,
     path = state.path,
     rev = state.rev,
+    line_range = state.line_range,
     skip = #state.items,
     limit = page_size_for(state.winid),
   }, function(payload, err)
@@ -311,8 +348,10 @@ local function set_keymaps(state)
   vim.keymap.set('n', config.options.keymaps.help, function()
     vim.notify(table.concat({
       'Guit history help', '',
-      (state.is_file and '  <CR>  open diff for this file in the selected commit and keep focus here' or '  <CR>  open commit in target window and keep focus here'),
-      (state.is_file and '  o     open file diff and move focus to target window' or '  o     open commit and move focus to target window'),
+      (state.line_range and '  <CR>  open file revision for this line range and keep focus here'
+        or (state.is_file and '  <CR>  open diff for this file in the selected commit and keep focus here' or '  <CR>  open commit in target window and keep focus here')),
+      (state.line_range and '  o     open file revision and move focus to target window'
+        or (state.is_file and '  o     open file diff and move focus to target window' or '  o     open commit and move focus to target window')),
       '  c     open commit in fugitive and keep focus here',
       '  C     open commit in fugitive and move focus to target window',
       '  s     open Guit show for the current commit in the lower pane',
@@ -322,7 +361,7 @@ local function set_keymaps(state)
       '  gg    jump to top',
       '  G     jump to bottom and request another page',
       '  ?     show this help', '',
-      'The compact stats column uses: <files>f <additions> <deletions>.',
+      state.line_range and 'Line history omits the compact stats column.' or 'The compact stats column uses: <files>f <additions> <deletions>.',
       'See :help guit for full documentation.',
     }, '\n'), vim.log.levels.INFO, { title = 'guit.nvim' })
   end, opts)
@@ -361,6 +400,8 @@ function M.open(opts)
     path_display = opts.path_display or opts.path,
     rev = opts.rev,
     is_file = opts.is_file or false,
+    line_range = opts.line_range,
+    hide_stats = opts.hide_stats or opts.line_range ~= nil,
     ns = vim.api.nvim_create_namespace(('guit-history-%d'):format(bufnr)),
     selection_ns = vim.api.nvim_create_namespace(('guit-history-select-%d'):format(bufnr)),
     items = {},

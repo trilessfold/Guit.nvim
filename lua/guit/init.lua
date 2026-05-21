@@ -78,6 +78,10 @@ function M.show(commit, opts)
 end
 
 function M.history(path, opts)
+  opts = opts or {}
+  if (not path or path == '') and opts.line_range then
+    path = '%'
+  end
   if not path or path == '' then
     vim.notify('guit.nvim: usage :Guit history <file_or_directory>', vim.log.levels.INFO)
     return
@@ -115,6 +119,8 @@ function M.history(path, opts)
     path_display = path,
     rev = source.commit,
     is_file = is_file,
+    line_range = opts.line_range,
+    hide_stats = opts.line_range ~= nil,
   }))
 end
 
@@ -173,8 +179,16 @@ function M.toggle()
   end)
 end
 
-function M.command(args)
+function M.command(args, opts)
+  opts = opts or {}
   local sub = args[1]
+  local range_opts = nil
+  if opts.range and opts.range > 0 then
+    local start_line = math.min(opts.line1, opts.line2)
+    local finish_line = math.max(opts.line1, opts.line2)
+    range_opts = { line_range = { start = start_line, finish = finish_line } }
+  end
+
   if sub == 'toggle' then
     return M.toggle()
   elseif sub == 'log' then
@@ -182,7 +196,7 @@ function M.command(args)
   elseif sub == 'show' then
     return M.show(args[2])
   elseif sub == 'history' then
-    return M.history(table.concat(vim.list_slice(args, 2), ' '))
+    return M.history(table.concat(vim.list_slice(args, 2), ' '), range_opts)
   elseif sub == 'compare' then
     local left = args[2]
     local right = args[3]

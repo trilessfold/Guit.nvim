@@ -56,15 +56,17 @@ local function status_label(item)
   return string.format('[%s] ', code)
 end
 
-function M.format_item(item)
+function M.format_item(item, state)
   local hash = fit_display(item.short_hash, 10)
   local date = fit_display(item.date, 16)
   local author = fit_display(item.author, 20)
-  local counts = counts_text(item)
   local subject = status_label(item) .. (item.subject or '')
 
   local sep = '  '
-  local segments = { hash, sep, date, sep, author, sep, counts, sep, subject }
+  local hide_stats = item.hide_stats or (state and state.hide_stats)
+  local counts = hide_stats and nil or counts_text(item)
+  local segments = hide_stats and { hash, sep, date, sep, author, sep, subject }
+    or { hash, sep, date, sep, author, sep, counts, sep, subject }
   local line = table.concat(segments)
 
   local hash_start = 0
@@ -73,8 +75,8 @@ function M.format_item(item)
   local date_end = date_start + #date
   local author_start = date_end + #sep
   local author_end = author_start + #author
-  local counts_start = author_end + #sep
-  local counts_end = counts_start + #counts
+  local counts_start = counts and (author_end + #sep) or nil
+  local counts_end = counts and (counts_start + #counts) or nil
 
   return line, {
     hash_start = hash_start,
@@ -96,22 +98,24 @@ function M.render_lines(state, start_idx)
 
   for i = start_idx, #state.items do
     local item = state.items[i]
-    local line, spans = M.format_item(item)
+    local line, spans = M.format_item(item, state)
     lines[#lines + 1] = line
     local row = offset + (#lines - 1)
 
     highlights[#highlights + 1] = { row, spans.hash_start, spans.hash_end, config.options.highlights.hash }
     highlights[#highlights + 1] = { row, spans.date_start, spans.date_end, config.options.highlights.date }
     highlights[#highlights + 1] = { row, spans.author_start, spans.author_end, config.options.highlights.author }
-    local counts = line:sub(spans.counts_start + 1, spans.counts_end)
-    local files_s, add_s, del_s = counts:match('^(%d+f)%s+(%d+)%s+(%d+)')
-    if files_s then
-      local files_col = spans.counts_start
-      highlights[#highlights + 1] = { row, files_col, files_col + #files_s, config.options.highlights.counter }
-      local add_col = files_col + #files_s + 1
-      highlights[#highlights + 1] = { row, add_col, add_col + #add_s, config.options.highlights.additions }
-      local del_col = add_col + #add_s + 1
-      highlights[#highlights + 1] = { row, del_col, del_col + #del_s, config.options.highlights.deletions }
+    if spans.counts_start and spans.counts_end then
+      local counts = line:sub(spans.counts_start + 1, spans.counts_end)
+      local files_s, add_s, del_s = counts:match('^(%d+f)%s+(%d+)%s+(%d+)')
+      if files_s then
+        local files_col = spans.counts_start
+        highlights[#highlights + 1] = { row, files_col, files_col + #files_s, config.options.highlights.counter }
+        local add_col = files_col + #files_s + 1
+        highlights[#highlights + 1] = { row, add_col, add_col + #add_s, config.options.highlights.additions }
+        local del_col = add_col + #add_s + 1
+        highlights[#highlights + 1] = { row, del_col, del_col + #del_s, config.options.highlights.deletions }
+      end
     end
   end
 
@@ -159,11 +163,15 @@ function M.update_winbar(state)
   local spinner = state.loading and '  loading…' or ''
   local done = state.eof and loaded > 0 and '  eof' or ''
   local path = state.path_display or state.path or ''
+  if state.line_range then
+    path = string.format('%s:%d,%d', path, state.line_range.start, state.line_range.finish)
+  end
   local rev = state.rev and (' @ ' .. state.rev:sub(1, 12) .. ' ') or ''
+  local title = state.line_range and ' Guit line history ' or ' Guit history '
 
   vim.wo[state.winid].winbar = table.concat({
     '%#' .. config.options.highlights.title .. '#',
-    ' Guit history ',
+    title,
     '%*',
     '%#' .. config.options.highlights.file .. '#',
     ' ' .. path .. ' ',

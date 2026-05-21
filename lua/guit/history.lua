@@ -199,9 +199,20 @@ function M.fetch_page(opts, on_done)
     ('--skip=%d'):format(opts.skip or 0),
     ('-n%d'):format(opts.limit),
     ('--pretty=format:%s'):format(pretty),
-    opts.rev or 'HEAD',
-    '--', opts.path,
   }
+
+  if opts.line_range then
+    vim.list_extend(args, {
+      ('-L%d,%d:%s'):format(opts.line_range.start, opts.line_range.finish, opts.path),
+      opts.rev or 'HEAD',
+      '--no-patch',
+    })
+  else
+    vim.list_extend(args, {
+      opts.rev or 'HEAD',
+      '--', opts.path,
+    })
+  end
 
   vim.system(args, { cwd = opts.cwd, text = true }, function(result)
     vim.schedule(function()
@@ -211,6 +222,15 @@ function M.fetch_page(opts, on_done)
       end
 
       local items = parse_log_items(result.stdout)
+      if opts.line_range then
+        for _, item in ipairs(items) do
+          item.path = opts.path
+          item.hide_stats = true
+        end
+        on_done({ items = items, eof = #items < opts.limit })
+        return
+      end
+
       local hashes = {}
       for _, item in ipairs(items) do
         hashes[#hashes + 1] = item.hash

@@ -2,6 +2,7 @@
 :Guit-compare	guit.txt	/*:Guit-compare*
 :Guit-history	guit.txt	/*:Guit-history*
 :Guit-history-percent	guit.txt	/*:Guit-history-percent*
+:Guit-history-range	guit.txt	/*:Guit-history-range*
 :Guit-log	guit.txt	/*:Guit-log*
 :Guit-show	guit.txt	/*:Guit-show*
 :Guit-show-percent	guit.txt	/*:Guit-show-percent*

@@ -95,6 +95,8 @@ local function restore_history(snapshot, opts)
     path_display = snapshot.path_display,
     rev = snapshot.rev,
     is_file = snapshot.is_file,
+    line_range = snapshot.line_range,
+    hide_stats = snapshot.hide_stats,
     restore = snapshot.restore,
     reuse_winid = opts.reuse_winid,
     target_winid = opts.target_winid,
