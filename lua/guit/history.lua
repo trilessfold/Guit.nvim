@@ -166,11 +166,12 @@ function M.normalize_path(repo, path)
   if vim.startswith(absolute, repo_abs) then
     local rel = absolute:sub(#repo_abs + 1)
     rel = rel:gsub('^/', '')
+    rel = rel:gsub('/+$', '')
     if rel ~= '' then
       return rel
     end
   end
-  return vim.fn.fnamemodify(path, ':.')
+  return (vim.fn.fnamemodify(path, ':.'):gsub('/+$', ''))
 end
 
 function M.fetch_total_count(opts, on_done)
