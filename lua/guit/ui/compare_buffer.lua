@@ -25,10 +25,6 @@ local function snapshot(state)
     },
   }
 end
-local function rerender(state, preferred_path)
-  panel.rerender(state, render, preferred_path)
-end
-
 local function open_file_diff(state, entry, keep_focus)
   if not entry or entry.kind ~= 'file' then return end
   if vim.fn.exists(':Gedit') ~= 2 or vim.fn.exists(':Gdiffsplit') ~= 2 then
@@ -58,7 +54,7 @@ local function refresh(state)
     state.items = items or {}
     local function apply_items()
       state.tree_state = changed_files.build_state(state.items)
-      rerender(state)
+      panel.rerender(state, render)
     end
     if config.options.show.show_counts then
       compare.fetch_numstat({ cwd = state.cwd, left = state.left, right = state.right }, function(stats, total, stats_err)
@@ -82,7 +78,7 @@ local function refresh(state)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
     if err then vim.notify('guit.nvim: ' .. err, vim.log.levels.WARN); return end
     state.meta = meta
-    rerender(state, (panel.current_entry(state) or {}).full_path)
+    panel.rerender(state, render, (panel.current_entry(state) or {}).full_path)
   end)
 end
 
@@ -103,10 +99,6 @@ local function attach_autocmds(state)
       pcall(vim.api.nvim_del_augroup_by_id, group)
     end,
   })
-end
-
-local function cycle_view(state)
-  panel.cycle_view(state, render)
 end
 
 local function help()
@@ -133,13 +125,13 @@ local function set_keymaps(state)
   vim.keymap.set('n', config.options.keymaps.close, function() session.close_active() end, opts)
   vim.keymap.set('n', config.options.keymaps.refresh, function() refresh(state) end, opts)
   vim.keymap.set('n', config.options.keymaps.focus_target, function() if state.target_winid and vim.api.nvim_win_is_valid(state.target_winid) then vim.api.nvim_set_current_win(state.target_winid) end end, opts)
-  vim.keymap.set('n', config.options.keymaps.toggle_view, function() cycle_view(state) end, opts)
+  vim.keymap.set('n', config.options.keymaps.toggle_view, function() panel.cycle_view(state, render) end, opts)
   vim.keymap.set('n', config.options.keymaps.collapse, function() if state.view_mode ~= 'tree' or not panel.in_entries_area(state) then vim.cmd('normal! h'); return end panel.collapse_current(state, render) end, opts)
   vim.keymap.set('n', config.options.keymaps.expand, function() if state.view_mode ~= 'tree' or not panel.in_entries_area(state) then vim.cmd('normal! l'); return end panel.expand_current(state, render) end, opts)
   vim.keymap.set('n', config.options.keymaps.collapse_all, function() panel.set_subtree(state, render, false) end, opts)
   vim.keymap.set('n', config.options.keymaps.expand_all, function() panel.set_subtree(state, render, true) end, opts)
   vim.keymap.set('n', config.options.keymaps.help, help, opts)
-  vim.keymap.set('n', '<CR>', function() local entry = panel.current_entry(state); if not entry then return end; if entry.kind == 'dir' and state.view_mode == 'tree' then changed_files.toggle_dir(state.tree_state, entry.full_path); rerender(state, entry.full_path); return end; open_file_diff(state, entry, true) end, opts)
+  vim.keymap.set('n', '<CR>', function() local entry = panel.current_entry(state); if not entry then return end; if entry.kind == 'dir' and state.view_mode == 'tree' then changed_files.toggle_dir(state.tree_state, entry.full_path); panel.rerender(state, render, entry.full_path); return end; open_file_diff(state, entry, true) end, opts)
   vim.keymap.set('n', config.options.keymaps.split, function() local entry = panel.current_entry(state); if entry and entry.kind == 'file' then open_file_diff(state, entry, false) end end, opts)
   vim.keymap.set('n', '[z', function() panel.jump_parent(state, render) end, opts)
   vim.keymap.set('n', 'zP', function() panel.jump_top(state, render) end, opts)

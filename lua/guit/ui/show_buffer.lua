@@ -102,10 +102,6 @@ local function snapshot(state)
   }
 end
 
-local function rerender(state, preferred_path)
-  panel.rerender(state, render, preferred_path)
-end
-
 local function open_file_diff(state, entry, keep_focus)
   if not entry or entry.kind ~= 'file' then
     return
@@ -147,7 +143,7 @@ local function fetch_meta(state)
       return
     end
     state.meta = meta
-    rerender(state, (panel.current_entry(state) or {}).full_path)
+    panel.rerender(state, render, (panel.current_entry(state) or {}).full_path)
   end)
 end
 
@@ -166,7 +162,7 @@ local function refresh(state)
 
     local function apply_items()
       state.tree_state = changed_files.build_state(state.items)
-      rerender(state)
+      panel.rerender(state, render)
     end
 
     if config.options.show.show_counts then
@@ -191,54 +187,6 @@ local function refresh(state)
     end
   end)
   fetch_meta(state)
-end
-
-local function cycle_view(state)
-  panel.cycle_view(state, render)
-end
-
-local function collapse_current(state)
-  panel.collapse_current(state, render)
-end
-
-local function expand_current(state)
-  panel.expand_current(state, render)
-end
-
-local function collapse_all(state)
-  panel.set_subtree(state, render, false)
-end
-
-local function expand_all(state)
-  panel.set_subtree(state, render, true)
-end
-
-local function collapse_global(state)
-  panel.set_all(state, render, false)
-end
-
-local function expand_global(state)
-  panel.set_all(state, render, true)
-end
-
-local function collapse_branch(state)
-  panel.collapse_branch(state, render)
-end
-
-local function expand_branch(state)
-  panel.expand_branch(state, render)
-end
-
-local function jump_parent(state)
-  panel.jump_parent(state, render)
-end
-
-local function jump_top(state)
-  panel.jump_top(state, render)
-end
-
-local function jump_sibling(state, delta)
-  panel.jump_sibling(state, render, delta)
 end
 
 local function show_help(state)
@@ -325,7 +273,7 @@ local function set_keymaps(state)
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.toggle_view, function()
-    cycle_view(state)
+    panel.cycle_view(state, render)
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.collapse, function()
@@ -333,7 +281,7 @@ local function set_keymaps(state)
       vim.cmd('normal! h')
       return
     end
-    collapse_current(state)
+    panel.collapse_current(state, render)
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.expand, function()
@@ -341,15 +289,15 @@ local function set_keymaps(state)
       vim.cmd('normal! l')
       return
     end
-    expand_current(state)
+    panel.expand_current(state, render)
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.collapse_all, function()
-    collapse_all(state)
+    panel.set_subtree(state, render, false)
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.expand_all, function()
-    expand_all(state)
+    panel.set_subtree(state, render, true)
   end, opts)
 
   vim.keymap.set('n', config.options.keymaps.help, function()
@@ -363,7 +311,7 @@ local function set_keymaps(state)
     end
     if entry.kind == 'dir' and state.view_mode == 'tree' then
       changed_files.toggle_dir(state.tree_state, entry.full_path)
-      rerender(state, entry.full_path)
+      panel.rerender(state, render, entry.full_path)
       return
     end
     open_file_diff(state, entry, true)
@@ -377,29 +325,29 @@ local function set_keymaps(state)
   end, opts)
 
   vim.keymap.set('n', '[z', function()
-    jump_parent(state)
+    panel.jump_parent(state, render)
   end, opts)
   vim.keymap.set('n', 'zP', function()
-    jump_top(state)
+    panel.jump_top(state, render)
   end, opts)
   vim.keymap.set('n', 'zj', function()
-    jump_sibling(state, 1)
+    panel.jump_sibling(state, render, 1)
   end, opts)
   vim.keymap.set('n', 'zJ', function()
-    jump_sibling(state, 1)
+    panel.jump_sibling(state, render, 1)
   end, opts)
   vim.keymap.set('n', 'zk', function()
-    jump_sibling(state, -1)
+    panel.jump_sibling(state, render, -1)
   end, opts)
   vim.keymap.set('n', 'zK', function()
-    jump_sibling(state, -1)
+    panel.jump_sibling(state, render, -1)
   end, opts)
 
   vim.keymap.set('n', 'zM', function()
-    collapse_global(state)
+    panel.set_all(state, render, false)
   end, opts)
   vim.keymap.set('n', 'zR', function()
-    expand_global(state)
+    panel.set_all(state, render, true)
   end, opts)
 end
 
