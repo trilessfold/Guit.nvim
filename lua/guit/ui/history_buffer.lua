@@ -50,6 +50,8 @@ local function snapshot(state)
     is_file = state.is_file,
     line_range = state.line_range,
     hide_stats = state.hide_stats,
+    replaced = state.replaced,
+    follow = state.follow,
     restore = {
       line = line or restore.line,
       hash = item and item.hash or restore.hash,
@@ -197,6 +199,8 @@ end
 local function open_primary(state, item, keep_focus)
   if state.line_range then
     open_file_revision_for_history(state, item, keep_focus)
+  elseif state.replaced and state.is_file then
+    open_file_revision_for_history(state, item, keep_focus)
   elseif state.is_file then
     open_file_diff_for_history(state, item, keep_focus)
   else
@@ -208,7 +212,7 @@ local function fetch_total_count(state)
   if state.line_range then
     return
   end
-  history.fetch_total_count({ cwd = state.cwd, path = state.path, rev = state.rev }, function(count, err)
+  history.fetch_total_count({ cwd = state.cwd, path = state.path, rev = state.rev, follow = state.follow }, function(count, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
     if err then
       vim.notify('guit.nvim: ' .. err, vim.log.levels.WARN)
@@ -232,6 +236,7 @@ local function fetch_more(state, force)
     path = state.path,
     rev = state.rev,
     line_range = state.line_range,
+    follow = state.follow,
     skip = #state.items,
     limit = page_size_for(state.winid),
   }, function(payload, err)
@@ -403,6 +408,8 @@ function M.open(opts)
     is_file = opts.is_file or false,
     line_range = opts.line_range,
     hide_stats = opts.hide_stats or opts.line_range ~= nil,
+    replaced = opts.replaced or false,
+    follow = opts.follow or false,
     ns = vim.api.nvim_create_namespace(('guit-history-%d'):format(bufnr)),
     selection_ns = vim.api.nvim_create_namespace(('guit-history-select-%d'):format(bufnr)),
     items = {},

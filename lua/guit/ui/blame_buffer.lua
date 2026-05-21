@@ -304,6 +304,27 @@ local function ensure_committed(item)
   return true
 end
 
+local function revision_target(state, item)
+  if not item or not item.hash then
+    return nil
+  end
+  if item.hash:match('^0+$') then
+    if state.replaced and item.previous_hash and item.previous_path then
+      return {
+        hash = item.previous_hash,
+        path = item.previous_path,
+        line = item.original_line or item.line,
+      }
+    end
+    return nil
+  end
+  return {
+    hash = item.hash,
+    path = item.filename or state.path,
+    line = item.original_line or item.line,
+  }
+end
+
 local function resolve_commit(cwd, rev)
   if not cwd or not rev or rev == '' then
     return nil
@@ -404,20 +425,22 @@ end
 
 local function open_file_revision(state)
   local item = current_item(state)
-  if not ensure_committed(item) then
+  local target = revision_target(state, item)
+  if not target then
+    ensure_committed(item)
     return
   end
   if vim.fn.exists(':Gedit') ~= 2 then
     vim.notify('guit.nvim: fugitive not found (:Gedit unavailable)', vim.log.levels.ERROR)
     return
   end
-  if already_open_in_target(state, item) then
+  if not item.hash:match('^0+$') and already_open_in_target(state, { hash = target.hash }) then
     return
   end
   local snapshot = target_snapshot(state)
-  local target_line = item.original_line or item.line
+  local target_line = target.line
   local opened = open_in_target(state, function()
-    vim.cmd(('Gedit %s:%s'):format(item.hash, vim.fn.fnameescape(item.filename or state.path)))
+    vim.cmd(('Gedit %s:%s'):format(target.hash, vim.fn.fnameescape(target.path)))
     if target_line then
       local max_line = vim.api.nvim_buf_line_count(0)
       pcall(vim.api.nvim_win_set_cursor, 0, { math.max(1, math.min(target_line, max_line)), 0 })
@@ -555,12 +578,14 @@ function resolve_target(winid)
     return nil
   end
 
+  local path = history.normalize_path(repo, source.path)
   return {
     target_winid = winid,
     target_bufnr = bufnr,
     cwd = repo,
-    path = history.normalize_path(repo, source.path),
+    path = path,
     rev = source.commit,
+    replaced = not source.commit and history.is_replaced_path(repo, path),
   }
 end
 
@@ -633,6 +658,7 @@ function set_target(state, target, opts)
   state.cwd = target.cwd
   state.path = target.path
   state.rev = target.rev
+  state.replaced = target.replaced
   fetch_target(state, opts)
 end
 
@@ -778,6 +804,7 @@ function M.open(opts)
     target_bufnr = opts.target_bufnr,
     cwd = opts.cwd,
     path = opts.path,
+    replaced = opts.replaced or (not opts.rev and history.is_replaced_path(opts.cwd, opts.path)),
     mode = opts.mode or config.options.blame.mode,
     items = {},
     ns = vim.api.nvim_create_namespace(('guit-blame-%d'):format(bufnr)),

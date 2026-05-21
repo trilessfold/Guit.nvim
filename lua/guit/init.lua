@@ -6,6 +6,7 @@ local compare_buffer = require('guit.ui.compare_buffer')
 local history_buffer = require('guit.ui.history_buffer')
 local blame_buffer = require('guit.ui.blame_buffer')
 local fugitive = require('guit.fugitive')
+local history = require('guit.history')
 local session = require('guit.session')
 
 local M = {}
@@ -105,7 +106,7 @@ function M.history(path, opts)
     return
   end
 
-  local rel = require('guit.history').normalize_path(repo, path)
+  local rel = history.normalize_path(repo, path)
   local abs = vim.fn.fnamemodify(path, ':p')
   local stat_path = abs
   if vim.fn.filereadable(abs) == 0 and vim.fn.isdirectory(abs) == 0 then
@@ -121,6 +122,8 @@ function M.history(path, opts)
     is_file = is_file,
     line_range = opts.line_range,
     hide_stats = opts.line_range ~= nil,
+    replaced = not source.commit and history.is_replaced_path(repo, rel),
+    follow = is_file and not opts.line_range,
   }))
 end
 
@@ -164,7 +167,7 @@ function M.blame(path, opts)
     return
   end
 
-  local rel = require('guit.history').normalize_path(repo, path)
+  local rel = history.normalize_path(repo, path)
   blame_buffer.open(vim.tbl_extend('force', opts, {
     cwd = repo,
     path = rel,
