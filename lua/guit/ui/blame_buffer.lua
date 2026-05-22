@@ -483,6 +483,47 @@ local function open_commit(state, keep_focus)
   end
 end
 
+local function blame_view_snapshot(state)
+  if not valid_win(state.winid) then
+    return nil
+  end
+
+  local current = vim.api.nvim_get_current_win()
+  vim.api.nvim_set_current_win(state.winid)
+  local snapshot = {
+    cursor = vim.api.nvim_win_get_cursor(state.winid),
+    view = vim.fn.winsaveview(),
+  }
+  if valid_win(current) then
+    vim.api.nvim_set_current_win(current)
+  end
+  return snapshot
+end
+
+local function restore_blame_view(state, snapshot)
+  if not snapshot or not valid_win(state.winid) then
+    return
+  end
+
+  local current = vim.api.nvim_get_current_win()
+  state.syncing = true
+  vim.api.nvim_set_current_win(state.winid)
+  if snapshot.cursor then
+    local max_line = math.max(1, line_count(state.bufnr))
+    pcall(vim.api.nvim_win_set_cursor, state.winid, { math.max(1, math.min(snapshot.cursor[1], max_line)), snapshot.cursor[2] or 0 })
+  end
+  if snapshot.view then
+    pcall(vim.fn.winrestview, snapshot.view)
+  end
+  state.syncing = false
+  if valid_win(state.target_winid) then
+    pcall(vim.cmd, 'syncbind')
+  end
+  if not valid_win(current) or current ~= state.winid then
+    vim.api.nvim_set_current_win(state.winid)
+  end
+end
+
 local function open_show(state)
   local item = current_item(state)
   if not ensure_committed(item) then
@@ -493,6 +534,7 @@ local function open_show(state)
     return
   end
   local current = vim.api.nvim_get_current_win()
+  local blame_snapshot = blame_view_snapshot(state)
   vim.api.nvim_set_current_win(state.target_winid)
   local ok, err = pcall(function()
     require('guit').show(item.hash, { cwd = state.cwd })
@@ -502,6 +544,23 @@ local function open_show(state)
       vim.api.nvim_set_current_win(current)
     end
     vim.notify('guit.nvim: ' .. tostring(err), vim.log.levels.ERROR)
+    return
+  end
+
+  local show_bufnr = vim.api.nvim_get_current_buf()
+  if vim.api.nvim_buf_is_valid(show_bufnr) then
+    local group = vim.api.nvim_create_augroup(('GuitBlameShowReturn_%d_%d'):format(state.bufnr, show_bufnr), { clear = true })
+    vim.api.nvim_create_autocmd('BufWipeout', {
+      group = group,
+      buffer = show_bufnr,
+      once = true,
+      callback = function()
+        vim.schedule(function()
+          restore_blame_view(state, blame_snapshot)
+          pcall(vim.api.nvim_del_augroup_by_id, group)
+        end)
+      end,
+    })
   end
 end
 
