@@ -34,7 +34,7 @@ M.defaults = {
   },
   blame = {
     mode = 'color', -- color | plain | heat
-    width = 48,
+    width = 60,
   },
   git = {
     pretty = table.concat({

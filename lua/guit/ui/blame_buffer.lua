@@ -78,37 +78,76 @@ local function render_layout(state)
     width = vim.api.nvim_win_get_width(state.winid)
   end
 
-  local available = width - 23
-  if available <= 0 then
-    return { author = 0, summary = 0 }
-  end
-
-  local author = math.min(18, math.max(10, math.floor(width * 0.3)), available)
-  local summary = available - author - 1
-  if summary < 4 then
-    author = available
-    summary = 0
-  end
-  return { author = author, summary = summary }
+  return {
+    author = math.max(0, width - 21),
+    summary = math.max(0, width - 10),
+  }
 end
 
 local function is_current_item(state, item)
   return item and item.hash and state.current_hash and item.hash == state.current_hash
 end
 
-local function line_text(state, item)
+local function block_marker(state, item)
+  return is_current_item(state, item) and '█' or '▌'
+end
+
+local function block_start_item_at(state, row)
+  local item = state.items[row]
+  if not item then
+    return nil
+  end
+  if item.block_start then
+    return item
+  end
+
+  local hash = item.hash
+  for index = row - 1, 1, -1 do
+    local candidate = state.items[index]
+    if not candidate or candidate.hash ~= hash then
+      break
+    end
+    if candidate.block_start then
+      return candidate
+    end
+  end
+  return nil
+end
+
+local function is_block_summary_line(state, row)
+  local item = state.items[row]
+  local previous = state.items[row - 1]
+  return item and previous and previous.block_start and previous.hash == item.hash
+end
+
+local function is_single_line_block(state, row)
+  local item = state.items[row]
+  local next_item = state.items[row + 1]
+  return item and item.block_start and (not next_item or next_item.hash ~= item.hash)
+end
+
+local function summary_line_text(state, item)
+  local layout = state.render_layout or render_layout(state)
+  if not item or not item.summary or layout.summary <= 0 then
+    return block_marker(state, item)
+  end
+  return string.format('%s %s', block_marker(state, item), item.summary)
+end
+
+local function line_text(state, item, row)
   if not item then
     return '  '
   end
-  local block_marker = is_current_item(state, item) and '█' or '▌'
+  if is_block_summary_line(state, row) then
+    return summary_line_text(state, state.items[row - 1])
+  end
+  local marker = block_marker(state, item)
   if item.block_start then
     local layout = state.render_layout or render_layout(state)
     local author = pad_display(item.author, layout.author)
-    local summary = layout.summary > 0 and pad_display(item.summary, layout.summary) or ''
-    local body = layout.summary > 0 and (author .. ' ' .. summary) or author
-    return string.format('%s %s %s %s', block_marker, item.short_hash, body, format_time(item.author_time))
+    return string.format('%s %s %s %s', marker, item.short_hash, author, format_time(item.author_time))
   end
-  return block_marker
+  return marker
 end
 
 local function hl_name(prefix, id)
@@ -224,6 +263,53 @@ local function add_diff_fillers(state)
   end
 end
 
+local function clear_hover_summary(state)
+  if state.hover_ns and valid_buf(state.bufnr) then
+    vim.api.nvim_buf_clear_namespace(state.bufnr, state.hover_ns, 0, -1)
+  end
+  if state.hover_ns and valid_buf(state.target_bufnr) then
+    vim.api.nvim_buf_clear_namespace(state.target_bufnr, state.hover_ns, 0, -1)
+  end
+end
+
+local function update_hover_summary(state)
+  if not state.hover_ns then
+    return
+  end
+  clear_hover_summary(state)
+  if not valid_win(state.winid) or not valid_buf(state.bufnr) then
+    return
+  end
+
+  local row = vim.api.nvim_win_get_cursor(state.winid)[1]
+  local item = block_start_item_at(state, row)
+  local layout = state.render_layout or render_layout(state)
+  if not item or not is_single_line_block(state, item.line) or not item.summary or item.summary == '' or layout.summary <= 0 then
+    return
+  end
+
+  vim.api.nvim_buf_set_extmark(state.bufnr, state.hover_ns, row - 1, 0, {
+    virt_lines = {
+      {
+        { block_marker(state, item), marker_hl(state, item) },
+        { ' ', 'Normal' },
+        { item.summary, 'Comment' },
+      },
+    },
+    virt_lines_leftcol = true,
+    priority = 20,
+  })
+
+  if valid_buf(state.target_bufnr) and row <= line_count(state.target_bufnr) then
+    local target_width = valid_win(state.target_winid) and vim.api.nvim_win_get_width(state.target_winid) or 1
+    vim.api.nvim_buf_set_extmark(state.target_bufnr, state.hover_ns, row - 1, 0, {
+      virt_lines = { { { string.rep('╱', math.max(1, target_width)), 'Comment' } } },
+      virt_lines_leftcol = true,
+      priority = 20,
+    })
+  end
+end
+
 local function with_eventignore_all(fn)
   local eventignore = vim.o.eventignore
   vim.o.eventignore = 'all'
@@ -240,7 +326,7 @@ local function render(state)
   local max_lines = math.max(#state.items, line_count(state.target_bufnr))
   state.render_layout = render_layout(state)
   for i = 1, max_lines do
-    out[i] = line_text(state, state.items[i])
+    out[i] = line_text(state, state.items[i], i)
   end
 
   ui_util.with_modifiable(state.bufnr, function()
@@ -260,10 +346,13 @@ local function render(state)
     vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, marker_hl(state, item), row - 1, 0, math.min(#line, 3))
     if item.block_start then
       vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, group, row - 1, 4, math.min(#line, 12))
+    elseif is_block_summary_line(state, row) then
+      vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, 'Comment', row - 1, 2, -1)
     end
   end
 
   add_diff_fillers(state)
+  update_hover_summary(state)
 end
 
 local function current_item(state)
@@ -439,11 +528,17 @@ local function open_file_revision(state)
   end
   local snapshot = target_snapshot(state)
   local target_line = target.line
+  local target_col = 0
+  if valid_win(state.target_winid) then
+    target_col = vim.api.nvim_win_get_cursor(state.target_winid)[2]
+  end
   local opened = open_in_target(state, function()
     vim.cmd(('Gedit %s:%s'):format(target.hash, vim.fn.fnameescape(target.path)))
     if target_line then
       local max_line = vim.api.nvim_buf_line_count(0)
-      pcall(vim.api.nvim_win_set_cursor, 0, { math.max(1, math.min(target_line, max_line)), 0 })
+      local line = math.max(1, math.min(target_line, max_line))
+      local line_text_at_target = vim.api.nvim_buf_get_lines(0, line - 1, line, false)[1] or ''
+      pcall(vim.api.nvim_win_set_cursor, 0, { line, math.min(target_col, #line_text_at_target) })
     end
     push_target_snapshot(state, snapshot)
     local bufnr = vim.api.nvim_get_current_buf()
@@ -674,6 +769,7 @@ local function sync_to_target(state)
     end
   end
   state.syncing = false
+  update_hover_summary(state)
 end
 
 local function fetch_target(state, opts)
@@ -711,6 +807,7 @@ function set_target(state, target, opts)
     return
   end
 
+  clear_hover_summary(state)
   set_bind(state, state.target_winid, false)
   state.target_winid = target.target_winid
   state.target_bufnr = target.target_bufnr
@@ -786,10 +883,26 @@ local function attach_autocmds(state)
       end
     end,
   })
+  vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+    group = group,
+    callback = function()
+      if not valid_win(state.winid) then
+        pcall(vim.api.nvim_del_augroup_by_id, group)
+        return
+      end
+      local winid = vim.api.nvim_get_current_win()
+      if winid == state.target_winid then
+        sync_to_target(state)
+      elseif winid == state.winid then
+        update_hover_summary(state)
+      end
+    end,
+  })
   vim.api.nvim_create_autocmd('BufWipeout', {
     group = group,
     buffer = state.bufnr,
     callback = function()
+      clear_hover_summary(state)
       state_by_buf[state.bufnr] = nil
       set_bind(state, state.target_winid, false)
       pcall(vim.api.nvim_del_augroup_by_id, group)
@@ -867,6 +980,7 @@ function M.open(opts)
     mode = opts.mode or config.options.blame.mode,
     items = {},
     ns = vim.api.nvim_create_namespace(('guit-blame-%d'):format(bufnr)),
+    hover_ns = vim.api.nvim_create_namespace(('guit-blame-hover-%d'):format(bufnr)),
   }
 
   state.winid, state.target_winid = open_window(state)
