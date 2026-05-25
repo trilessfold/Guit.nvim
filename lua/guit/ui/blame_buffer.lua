@@ -769,7 +769,6 @@ local function sync_to_target(state)
     end
   end
   state.syncing = false
-  update_hover_summary(state)
 end
 
 local function fetch_target(state, opts)
@@ -892,7 +891,7 @@ local function attach_autocmds(state)
       end
       local winid = vim.api.nvim_get_current_win()
       if winid == state.target_winid then
-        sync_to_target(state)
+        clear_hover_summary(state)
       elseif winid == state.winid then
         update_hover_summary(state)
       end
