@@ -34,7 +34,7 @@ require('guit').setup({
   },
   blame = {
     mode = 'color', -- color, plain, or heat
-    width = 48,
+    width = 60,
   },
 })
 ```
@@ -143,11 +143,13 @@ revisions.
 
 `Guit blame` opens a narrow blame buffer to the left of the current file. The blame and target windows use `scrollbind` and `cursorbind`, so scrolling either window keeps the other aligned. While the blame pane is open, focusing another normal file or Fugitive file object retargets blame to that buffer.
 
-Blame is rendered as blocks: the first line of each consecutive commit block shows hash, author, summary, and date; following lines in the same block show a continuation marker. Modes keep the normal window background and color the hash plus block marker:
+Blame is rendered as blocks: the first line of each consecutive commit block shows hash, author, and date. Multi-line blocks show the commit summary on the second block line; single-line blocks show the summary as a temporary virtual line when the blame cursor is on that block. Modes keep the normal window background and color the hash plus block marker:
 
 - `color` gives each commit hash a stable color
 - `plain` uses the regular Guit hash styling
 - `heat` colors older-to-newer lines from cool to warm
+
+When the target window has collapsed folds, the blame pane does not mirror the folds. Instead it keeps the blame cursor visible by nudging only the blame viewport when the cursor approaches the top or bottom edge.
 
 
 ## Command-line completion

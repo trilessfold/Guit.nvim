@@ -192,14 +192,22 @@ repeating full metadata on every line.
 The first line of each block shows:
     short hash
     author
-    summary
     author date
+
+For multi-line blocks, the second line shows the commit summary in muted
+highlighting. Single-line blocks show the summary as a temporary virtual line
+when the blame cursor is on that block.
 
 Following lines in the same block show a continuation marker.
 
 The blame and target windows use 'scrollbind' and 'cursorbind' so scrolling or
 moving in either window keeps the other aligned. Focusing another normal file
 or Fugitive file object retargets the blame pane to that buffer.
+
+When the target window has collapsed folds, the blame pane does not mirror those
+folds. Instead it nudges only the blame viewport when the synced cursor gets
+near the top or bottom edge. This keeps the active blame line visible without
+changing folds or scroll state in the target window.
 
 Keys:
     <CR>    Open the file at the blamed revision in the target window without
@@ -223,7 +231,7 @@ Configure the default mode and width with:
   require('guit').setup({
     blame = {
       mode = 'color', -- color | plain | heat
-      width = 48,
+      width = 60,
     },
   })
 <
@@ -257,7 +265,7 @@ CONFIGURATION                                           *guit-config*
     },
     blame = {
       mode = 'color',
-      width = 48,
+      width = 60,
     },
     keymaps = {
       open_show = 's',
