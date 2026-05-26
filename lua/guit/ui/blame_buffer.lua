@@ -719,35 +719,62 @@ local function target_is_diff(state)
   return valid_win(state.target_winid) and vim.wo[state.target_winid].diff
 end
 
--- Closed folds in the target can leave the blame cursor near the bottom of its
--- own viewport while the visible target line has moved on. Shift only the blame
--- viewport, with bindings disabled, so folds/diff state in the target is left
--- untouched.
-local function adjust_blame_viewport(state, line)
-  if not valid_win(state.winid) or not valid_buf(state.bufnr) then
+-- Closed folds and EOF filler lines make target screen rows diverge from blame
+-- rows in different ways. With folds, follow the target cursor's screen row;
+-- without folds, copy the target topline so EOF filler does not pull blame up.
+local function target_view_anchor(state)
+  if not valid_win(state.target_winid) then
+    return nil
+  end
+
+  local ok, result = pcall(vim.api.nvim_win_call, state.target_winid, function()
+    local top = tonumber(vim.fn.line('w0')) or 1
+    local bottom = tonumber(vim.fn.line('w$')) or top
+    local lnum = top
+    local has_closed_fold = false
+    while lnum <= bottom do
+      local fold_start = tonumber(vim.fn.foldclosed(lnum)) or -1
+      if fold_start > 0 then
+        has_closed_fold = true
+        break
+      end
+      lnum = lnum + 1
+    end
+
+    if not has_closed_fold then
+      return { topline = top, cursor_line = vim.api.nvim_win_get_cursor(0)[1] }
+    end
+
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    return {
+      cursor_line = cursor[1],
+      topline = math.max(1, cursor[1] - math.max(1, vim.fn.winline()) + 1),
+    }
+  end)
+  if not ok then
+    return nil
+  end
+  return result
+end
+
+local function adjust_blame_viewport(state, anchor)
+  if not valid_win(state.winid) or not valid_buf(state.bufnr) or not anchor or not anchor.topline then
     return
   end
 
-  local current = vim.api.nvim_get_current_win()
   local scrollbind = vim.wo[state.winid].scrollbind
   local cursorbind = vim.wo[state.winid].cursorbind
   vim.wo[state.winid].scrollbind = false
   vim.wo[state.winid].cursorbind = false
-  vim.api.nvim_set_current_win(state.winid)
 
-  local ok = pcall(function()
-    local height = vim.api.nvim_win_get_height(state.winid)
-    local margin = math.min(5, math.max(1, math.floor(height / 3)))
-    local top = tonumber(vim.fn.line('w0')) or 1
-    local bottom = tonumber(vim.fn.line('w$')) or top
-    local total = line_count(state.bufnr)
-    local topline
-
-    if line >= bottom - margin then
-      topline = math.min(math.max(1, total - height + 1), math.max(1, line - height + margin + 1))
-    elseif line <= top + margin then
-      topline = math.max(1, line - margin)
+  local ok = pcall(vim.api.nvim_win_call, state.winid, function()
+    if anchor.cursor_line then
+      local line = math.max(1, math.min(anchor.cursor_line, line_count(state.bufnr)))
+      pcall(vim.api.nvim_win_set_cursor, state.winid, { line, 0 })
     end
+
+    local top = tonumber(vim.fn.line('w0')) or 1
+    local topline = math.max(1, math.min(line_count(state.bufnr), anchor.topline))
 
     if topline and topline ~= top then
       local view = vim.fn.winsaveview()
@@ -758,9 +785,6 @@ local function adjust_blame_viewport(state, line)
 
   vim.wo[state.winid].scrollbind = scrollbind
   vim.wo[state.winid].cursorbind = cursorbind
-  if valid_win(current) then
-    vim.api.nvim_set_current_win(current)
-  end
   return ok
 end
 
@@ -833,7 +857,7 @@ local function sync_to_target(state)
         vim.api.nvim_set_current_win(current)
       end
     end
-    adjust_blame_viewport(state, line)
+    adjust_blame_viewport(state, target_view_anchor(state))
   end
   state.syncing = false
 end
@@ -962,9 +986,7 @@ local function attach_autocmds(state)
         if target_is_diff(state) then
           sync_to_target(state)
         else
-          local target_cursor = vim.api.nvim_win_get_cursor(state.target_winid)
-          local line = math.max(1, math.min(target_cursor[1], line_count(state.target_bufnr)))
-          adjust_blame_viewport(state, line)
+          adjust_blame_viewport(state, target_view_anchor(state))
         end
       elseif winid == state.winid then
         update_hover_summary(state)
