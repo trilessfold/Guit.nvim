@@ -6,6 +6,7 @@
 :Guit-log	guit.txt	/*:Guit-log*
 :Guit-show	guit.txt	/*:Guit-show*
 :Guit-show-percent	guit.txt	/*:Guit-show-percent*
+:Guit-status	guit.txt	/*:Guit-status*
 :Guit-toggle	guit.txt	/*:Guit-toggle*
 guit	guit.txt	/*guit*
 guit-blame	guit.txt	/*guit-blame*
@@ -17,5 +18,6 @@ guit-log	guit.txt	/*guit-log*
 guit-notes	guit.txt	/*guit-notes*
 guit-show	guit.txt	/*guit-show*
 guit-show_counts	guit.txt	/*guit-show_counts*
+guit-status	guit.txt	/*guit-status*
 guit-toggle	guit.txt	/*guit-toggle*
 guit.txt	guit.txt	/*guit.txt*

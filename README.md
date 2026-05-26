@@ -8,6 +8,7 @@ A lightweight Git log and commit browser for Neovim, built as a thin layer on to
 - `:Guit show <commit>` opens changed files for a commit in a bottom pane
 - `:Guit history <path>` opens file, directory, or selected-line history in a bottom pane
 - `:Guit compare <left> <right>` compares two revisions in a bottom pane
+- `:Guit status` opens a read-only working tree changes browser in a bottom pane
 - `:Guit blame` opens block-based blame in a left pane and follows the focused file window
 - `:Guit toggle` closes and restores the last Guit pane
 - Read-only UI buffers for log, show, history, and compare panes
@@ -50,6 +51,7 @@ require('guit').setup({
 - `:'<,'>Guit history`
 - `:Guit compare <left_rev> <right_rev>`
 - `:Guit compare <left_rev>..<right_rev>`
+- `:Guit status`
 - `:Guit blame`
 
 `:Guit toggle` closes an open Guit pane. If no Guit pane is open, it restores the last Guit view; before any prior view, it opens `:Guit log`.
@@ -134,6 +136,16 @@ require('guit').setup({
 This opens a bottom compare pane similar to `Guit show`, with tree/list views,
 change counts, and Fugitive diff opening for the selected file between the two
 revisions.
+
+## Working tree status
+
+```vim
+:Guit status
+```
+
+`Guit status` opens a read-only working tree changes browser. It groups files under `Staged`, `Unstaged`, `Untracked`, and `Conflicts` sections and reuses the same tree/list navigation as `Guit show` and `Guit compare`.
+
+Opening an entry opens the working tree file. Press `dd` to open the Fugitive diff for the selected file. The status pane intentionally does not stage, unstage, restore, or otherwise modify files.
 
 ## Blame
 

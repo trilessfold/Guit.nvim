@@ -48,6 +48,13 @@ COMMANDS                                                *guit-commands*
     Press <CR> on a file to open the right revision and diff it against the left
     revision in Fugitive.
 
+:Guit status                                             *:Guit-status*
+    Open a read-only working tree changes browser in a bottom split. Files are
+    grouped under Staged, Unstaged, Untracked, and Conflicts sections. Opening
+    entries opens working tree files. Press dd to open the Fugitive diff for
+    the selected file. This command does not stage, unstage, restore, or
+    otherwise modify files.
+
 Command-line completion:
     |:Guit-log|, |:Guit-show|, and |:Guit-compare| complete local branches,
     remote branches, tags, and HEAD. |:Guit-show| and |:Guit-history| complete
@@ -145,6 +152,42 @@ Keys:
     r       Refresh the compare view.
     q       Close the pane.
     ?       Show a short in-editor help message.
+
+===============================================================================
+STATUS BUFFER                                           *guit-status*
+
+The status buffer is read-only and shows current working tree changes grouped
+by Git state:
+    Staged
+    Unstaged
+    Untracked
+    Conflicts
+
+It reuses the tree/list navigation from |guit-show| and |guit-compare|.
+
+Keys:
+    <CR>    On a file: open the working tree file in the target window.
+            On a directory in tree mode: toggle the directory.
+    o       Open the selected file and move focus to the target window.
+    dd      Open the selected file diff and keep focus in status.
+    <Tab>   Jump to the target window.
+    [z      Jump to the parent directory.
+    zP      Jump to the top-level directory for the current branch.
+    zj/zJ   Jump to the next sibling entry.
+    zk/zK   Jump to the previous sibling entry.
+    t       Toggle between tree and list views.
+    h       Collapse the current directory.
+    l       Expand the current directory.
+    H       Collapse the current subtree.
+    L       Expand the current subtree.
+    zM      Collapse all directories.
+    zR      Expand all directories.
+    r       Refresh status.
+    q       Close status.
+    ?       Show a short in-editor help message.
+
+|:Guit-status| is intentionally read-only. It does not stage, unstage, restore,
+or otherwise modify files.
 
 ===============================================================================
 HISTORY BUFFER                                          *guit-history*

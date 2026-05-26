@@ -120,6 +120,18 @@ local function restore_compare(snapshot, opts)
   })
 end
 
+local function restore_status(snapshot, opts)
+  opts = opts or {}
+  require('guit.ui.status_buffer').open({
+    cwd = snapshot.cwd,
+    view_mode = snapshot.view_mode,
+    restore = snapshot.restore,
+    reuse_winid = opts.reuse_winid,
+    target_winid = opts.target_winid,
+    preview = opts.preview,
+  })
+end
+
 function M.open_snapshot(snapshot, opts)
   if snapshot.kind == 'log' then
     restore_log(snapshot, opts)
@@ -129,6 +141,8 @@ function M.open_snapshot(snapshot, opts)
     restore_history(snapshot, opts)
   elseif snapshot.kind == 'compare' then
     restore_compare(snapshot, opts)
+  elseif snapshot.kind == 'status' then
+    restore_status(snapshot, opts)
   end
 end
 
@@ -146,7 +160,7 @@ function M.restore(default_open)
     return false
   end
 
-  if snapshot.kind == 'log' or snapshot.kind == 'show' or snapshot.kind == 'history' or snapshot.kind == 'compare' then
+  if snapshot.kind == 'log' or snapshot.kind == 'show' or snapshot.kind == 'history' or snapshot.kind == 'compare' or snapshot.kind == 'status' then
     M.open_snapshot(snapshot)
   elseif default_open then
     default_open()

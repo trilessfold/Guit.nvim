@@ -157,8 +157,13 @@ function M.build_tree(items)
           kind = 'file',
           name = part,
           full_path = item.path,
+          worktree_path = item.worktree_path or item.path,
+          section = item.section,
+          section_label = item.section_label,
+          section_order = item.section_order,
           status = item.status,
           old_path = item.old_path,
+          worktree_old_path = item.worktree_old_path or item.old_path,
           additions = item.additions or 0,
           deletions = item.deletions or 0,
         }
@@ -248,8 +253,13 @@ function M.flatten_tree(root, expanded)
           depth = depth,
           name = child.name,
           full_path = child.full_path,
+          worktree_path = child.worktree_path or child.full_path,
+          section = child.section,
+          section_label = child.section_label,
+          section_order = child.section_order,
           status = child.status,
           old_path = child.old_path,
+          worktree_old_path = child.worktree_old_path or child.old_path,
           additions = child.additions or 0,
           deletions = child.deletions or 0,
         }
@@ -261,20 +271,62 @@ function M.flatten_tree(root, expanded)
   return entries
 end
 
-function M.as_list(items)
+local function list_name(item, sectioned)
+  if sectioned and item.worktree_path then
+    return item.worktree_path
+  end
+  return item.path
+end
+
+local function list_path(item, sectioned)
+  return item.path
+end
+
+function M.as_list(items, opts)
+  opts = opts or {}
   local entries = {}
   table.sort(items, function(a, b)
+    if opts.sectioned and a.section_order ~= b.section_order then
+      return (a.section_order or 99) < (b.section_order or 99)
+    end
     return a.path < b.path
   end)
 
+  local current_section = nil
+  local section_entry = nil
   for _, item in ipairs(items) do
+    if opts.sectioned and item.section and item.section ~= current_section then
+      current_section = item.section
+      section_entry = {
+        kind = 'dir',
+        depth = 0,
+        name = item.section_label or item.section,
+        full_path = item.section_label or item.section,
+        section = item.section,
+        section_label = item.section_label,
+        section_order = item.section_order,
+        expanded = true,
+        additions = 0,
+        deletions = 0,
+      }
+      entries[#entries + 1] = section_entry
+    end
+    if section_entry then
+      section_entry.additions = section_entry.additions + (item.additions or 0)
+      section_entry.deletions = section_entry.deletions + (item.deletions or 0)
+    end
     entries[#entries + 1] = {
       kind = 'file',
-      depth = 0,
-      name = item.path,
-      full_path = item.path,
+      depth = opts.sectioned and 1 or 0,
+      name = list_name(item, opts.sectioned),
+      full_path = list_path(item, opts.sectioned),
+      worktree_path = item.worktree_path or item.path,
+      section = item.section,
+      section_label = item.section_label,
+      section_order = item.section_order,
       status = item.status,
       old_path = item.old_path,
+      worktree_old_path = item.worktree_old_path or item.old_path,
       additions = item.additions or 0,
       deletions = item.deletions or 0,
     }
@@ -292,9 +344,9 @@ function M.build_state(items)
   }
 end
 
-function M.to_entries(items, mode, tree_state)
+function M.to_entries(items, mode, tree_state, opts)
   if mode == 'list' then
-    return M.as_list(items)
+    return M.as_list(items, opts)
   end
   if not tree_state or not tree_state.tree then
     tree_state = M.build_state(items)

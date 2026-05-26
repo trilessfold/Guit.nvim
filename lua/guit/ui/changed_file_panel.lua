@@ -153,7 +153,9 @@ function M.restore_cursor(state, render, preferred_path)
 end
 
 function M.rerender(state, render, preferred_path)
-  state.entries = changed_files.to_entries(state.items, state.view_mode, state.tree_state)
+  state.entries = changed_files.to_entries(state.items, state.view_mode, state.tree_state, {
+    sectioned = state.sectioned_list == true,
+  })
   render.render_all(state)
   M.restore_cursor(state, render, preferred_path)
   render.update_winbar(state)

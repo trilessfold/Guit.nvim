@@ -98,6 +98,8 @@ function M.setup()
     modified = adapt_status(0xe5c25c, normal_bg, mode),
     renamed = adapt_status(0x61afef, normal_bg, mode),
     copied = adapt_status(0xc678dd, normal_bg, mode),
+    untracked = adapt_status(0x56b6c2, normal_bg, mode),
+    conflict = adapt_status(0xff5f5f, normal_bg, mode),
     hash = identifier_hl.fg or adapt_text(0x7fa8d8, normal_fg, normal_bg, mode, { bg_ratio = mode == 'dark' and 0.84 or 0.74, fg_ratio = mode == 'dark' and 0.82 or 0.70 }),
     date = comment_hl.fg or adapt_text(0xa7acb8, normal_fg, normal_bg, mode, { bg_ratio = mode == 'dark' and 0.82 or 0.72, fg_ratio = mode == 'dark' and 0.80 or 0.70 }),
     author = type_hl.fg or adapt_text(0xc2cad6, normal_fg, normal_bg, mode, { bg_ratio = mode == 'dark' and 0.86 or 0.76, fg_ratio = mode == 'dark' and 0.86 or 0.76 }),
@@ -126,6 +128,10 @@ function M.setup()
   safe_set(config.options.highlights.status_modified, { fg = palette.modified })
   safe_set(config.options.highlights.status_renamed, { fg = palette.renamed })
   safe_set(config.options.highlights.status_copied, { fg = palette.copied })
+  safe_set(config.options.highlights.status_staged, { fg = palette.added })
+  safe_set(config.options.highlights.status_unstaged, { fg = palette.modified })
+  safe_set(config.options.highlights.status_untracked, { fg = palette.untracked })
+  safe_set(config.options.highlights.status_conflicts, { fg = palette.conflict })
 
   safe_set(config.options.highlights.additions, { fg = lighten(palette.added, 0.04) })
   safe_set(config.options.highlights.deletions, { fg = lighten(palette.deleted, 0.04) })

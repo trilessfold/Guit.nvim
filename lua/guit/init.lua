@@ -3,6 +3,7 @@ local git = require('guit.git')
 local buffer = require('guit.ui.buffer')
 local show_buffer = require('guit.ui.show_buffer')
 local compare_buffer = require('guit.ui.compare_buffer')
+local status_buffer = require('guit.ui.status_buffer')
 local history_buffer = require('guit.ui.history_buffer')
 local blame_buffer = require('guit.ui.blame_buffer')
 local fugitive = require('guit.fugitive')
@@ -143,6 +144,17 @@ function M.compare(left, right, opts)
   compare_buffer.open(vim.tbl_extend('force', opts or {}, { cwd = repo, left = left, right = right }))
 end
 
+function M.status(opts)
+  opts = opts or {}
+  local cwd = opts.cwd or vim.uv.cwd()
+  local repo, err = git.repo_root(cwd)
+  if not repo then
+    vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
+    return
+  end
+  status_buffer.open(vim.tbl_extend('force', opts, { cwd = repo }))
+end
+
 function M.blame(path, opts)
   opts = opts or {}
   if not path or path == '' then
@@ -210,11 +222,13 @@ function M.command(args, opts)
       end
     end
     return M.compare(left, right)
+  elseif sub == 'status' then
+    return M.status()
   elseif sub == 'blame' then
     return M.blame(table.concat(vim.list_slice(args, 2), ' '))
   end
 
-  vim.notify('guit.nvim: usage :Guit toggle | :Guit log [rev] | :Guit show <rev> | :Guit history <path> | :Guit compare <left_rev> <right_rev> | :Guit blame', vim.log.levels.INFO)
+  vim.notify('guit.nvim: usage :Guit toggle | :Guit log [rev] | :Guit show <rev> | :Guit history <path> | :Guit compare <left_rev> <right_rev> | :Guit status | :Guit blame', vim.log.levels.INFO)
 end
 
 return M
