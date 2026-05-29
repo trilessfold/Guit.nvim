@@ -53,6 +53,21 @@ local function format_counts(additions, deletions)
   return string.format('%d %d', additions or 0, deletions or 0)
 end
 
+local function add_count_highlights(state, row, line, counts_start)
+  if not counts_start then
+    return
+  end
+  local counts_text = line:sub(counts_start + 2)
+  local add_text, del_text = counts_text:match('^(%d+)%s+(%d+)$')
+  if not add_text then
+    return
+  end
+  local add_col = counts_start + 1
+  vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, config.options.highlights.additions, row, add_col, add_col + #add_text)
+  local del_col = add_col + #add_text + 1
+  vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, config.options.highlights.deletions, row, del_col, del_col + #del_text)
+end
+
 local function header_lines(state)
   local lines = {
     'Status: ' .. state.cwd,
@@ -119,11 +134,13 @@ function M.render_all(state)
       vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, icon_hl, row, start_col, start_col + 1)
       local counts_start = config.options.show.show_counts and line:match('.*()  %d+ %d+$') or nil
       vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, dir_hl, row, start_col + 2, counts_start and counts_start - 1 or -1)
+      add_count_highlights(state, row, line, counts_start)
     else
       local indent = #string.rep('  ', entry.depth or 0)
       vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, status_highlight(entry), row, indent, indent + 2)
       local counts_start = config.options.show.show_counts and line:match('.*()  %d+ %d+$') or nil
       vim.api.nvim_buf_add_highlight(state.bufnr, state.ns, config.options.highlights.file, row, indent + 3, counts_start and counts_start - 1 or -1)
+      add_count_highlights(state, row, line, counts_start)
     end
   end
   state.meta, state.commit = old_meta, old_commit

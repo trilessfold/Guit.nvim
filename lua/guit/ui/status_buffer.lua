@@ -69,15 +69,13 @@ local function open_worktree_file(state, entry, keep_focus)
   if not path then
     return
   end
-
-  local full_path = state.cwd .. '/' .. path
-  if vim.fn.filereadable(full_path) == 0 then
-    vim.notify('guit.nvim: file is not readable in the working tree: ' .. path, vim.log.levels.WARN)
+  if vim.fn.exists(':Gedit') ~= 2 then
+    vim.notify('guit.nvim: fugitive not found (:Gedit unavailable)', vim.log.levels.ERROR)
     return
   end
 
   local ok, err = preview.with_managed_preview(state, function()
-    vim.cmd('edit ' .. vim.fn.fnameescape(full_path))
+    vim.cmd(('Gedit %s'):format(vim.fn.fnameescape(path)))
   end)
   if not ok then
     vim.notify('guit.nvim: failed to open status file: ' .. tostring(err), vim.log.levels.ERROR)
