@@ -264,12 +264,16 @@ local function add_diff_fillers(state)
 end
 
 local function clear_hover_summary(state)
+  if not state.hover_visible then
+    return
+  end
   if state.hover_ns and valid_buf(state.bufnr) then
     vim.api.nvim_buf_clear_namespace(state.bufnr, state.hover_ns, 0, -1)
   end
   if state.hover_ns and valid_buf(state.target_bufnr) then
     vim.api.nvim_buf_clear_namespace(state.target_bufnr, state.hover_ns, 0, -1)
   end
+  state.hover_visible = false
 end
 
 local function update_hover_summary(state)
@@ -299,6 +303,7 @@ local function update_hover_summary(state)
     virt_lines_leftcol = true,
     priority = 20,
   })
+  state.hover_visible = true
 
   if valid_buf(state.target_bufnr) and row <= line_count(state.target_bufnr) then
     local target_width = valid_win(state.target_winid) and vim.api.nvim_win_get_width(state.target_winid) or 1
@@ -729,6 +734,11 @@ local function target_view_anchor(state)
 
   local ok, result = pcall(vim.api.nvim_win_call, state.target_winid, function()
     local top = tonumber(vim.fn.line('w0')) or 1
+    local cursor = vim.api.nvim_win_get_cursor(0)
+    if not vim.wo.foldenable then
+      return { topline = top, cursor_line = cursor[1] }
+    end
+
     local bottom = tonumber(vim.fn.line('w$')) or top
     local lnum = top
     local has_closed_fold = false
@@ -742,10 +752,9 @@ local function target_view_anchor(state)
     end
 
     if not has_closed_fold then
-      return { topline = top, cursor_line = vim.api.nvim_win_get_cursor(0)[1] }
+      return { topline = top, cursor_line = cursor[1] }
     end
 
-    local cursor = vim.api.nvim_win_get_cursor(0)
     return {
       cursor_line = cursor[1],
       topline = math.max(1, cursor[1] - math.max(1, vim.fn.winline()) + 1),
@@ -761,6 +770,16 @@ local function adjust_blame_viewport(state, anchor)
   if not valid_win(state.winid) or not valid_buf(state.bufnr) or not anchor or not anchor.topline then
     return
   end
+  local cursor_line = anchor.cursor_line and math.max(1, math.min(anchor.cursor_line, line_count(state.bufnr))) or nil
+  local topline = math.max(1, math.min(line_count(state.bufnr), anchor.topline))
+
+  local current_cursor = vim.api.nvim_win_get_cursor(state.winid)[1]
+  local current_topline = vim.api.nvim_win_call(state.winid, function()
+    return tonumber(vim.fn.line('w0')) or 1
+  end)
+  if (not cursor_line or current_cursor == cursor_line) and current_topline == topline then
+    return true
+  end
 
   local scrollbind = vim.wo[state.winid].scrollbind
   local cursorbind = vim.wo[state.winid].cursorbind
@@ -768,13 +787,11 @@ local function adjust_blame_viewport(state, anchor)
   vim.wo[state.winid].cursorbind = false
 
   local ok = pcall(vim.api.nvim_win_call, state.winid, function()
-    if anchor.cursor_line then
-      local line = math.max(1, math.min(anchor.cursor_line, line_count(state.bufnr)))
-      pcall(vim.api.nvim_win_set_cursor, state.winid, { line, 0 })
+    if cursor_line then
+      pcall(vim.api.nvim_win_set_cursor, state.winid, { cursor_line, 0 })
     end
 
     local top = tonumber(vim.fn.line('w0')) or 1
-    local topline = math.max(1, math.min(line_count(state.bufnr), anchor.topline))
 
     if topline and topline ~= top then
       local view = vim.fn.winsaveview()
