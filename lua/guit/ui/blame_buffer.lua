@@ -856,25 +856,28 @@ local function sync_to_target(state)
   -- Fugitive diff windows own their scrollbind/cursorbind pair. In that mode
   -- blame follows the cursor manually instead of joining the diff bind group.
   local bind_windows = not target_is_diff(state)
-  if bind_windows then
-    set_bind(state, state.winid, true)
-    set_bind(state, state.target_winid, true)
-  else
-    set_bind(state, state.winid, false)
-  end
   if valid_win(state.winid) and valid_win(state.target_winid) then
     local current = vim.api.nvim_get_current_win()
+    local anchor = target_view_anchor(state)
     local target_cursor = vim.api.nvim_win_get_cursor(state.target_winid)
     local line = math.max(1, math.min(target_cursor[1], line_count(state.target_bufnr)))
-    pcall(vim.api.nvim_win_set_cursor, state.winid, { line, 0 })
     if bind_windows then
+      set_bind(state, state.winid, false)
+      set_bind(state, state.target_winid, false)
+    else
+      set_bind(state, state.winid, false)
+    end
+    pcall(vim.api.nvim_win_set_cursor, state.winid, { line, 0 })
+    adjust_blame_viewport(state, anchor)
+    if bind_windows then
+      set_bind(state, state.winid, true)
+      set_bind(state, state.target_winid, true)
       vim.api.nvim_set_current_win(state.target_winid)
       pcall(vim.cmd, 'syncbind')
       if valid_win(current) then
         vim.api.nvim_set_current_win(current)
       end
     end
-    adjust_blame_viewport(state, target_view_anchor(state))
   end
   state.syncing = false
 end
@@ -1024,10 +1027,12 @@ end
 
 local function open_window(state)
   local target_winid = vim.api.nvim_get_current_win()
+  local target_cursor = vim.api.nvim_win_get_cursor(target_winid)
+  local target_view = vim.fn.winsaveview()
   local winid
   local ok = pcall(function()
     with_eventignore_all(function()
-      winid = vim.api.nvim_open_win(state.bufnr, true, {
+      winid = vim.api.nvim_open_win(state.bufnr, false, {
         win = target_winid,
         split = 'left',
         width = config.options.blame.width,
@@ -1064,10 +1069,16 @@ local function open_window(state)
   vim.wo[winid].wrap = false
   vim.wo[winid].winfixwidth = true
   vim.wo[winid].winfixbuf = true
-  vim.wo[winid].scrollbind = true
-  vim.wo[winid].cursorbind = true
+  vim.wo[winid].scrollbind = false
+  vim.wo[winid].cursorbind = false
   vim.wo[winid].cursorline = true
   vim.wo[winid].winbar = ''
+
+  if valid_win(target_winid) then
+    vim.api.nvim_set_current_win(target_winid)
+    pcall(vim.api.nvim_win_set_cursor, target_winid, target_cursor)
+    pcall(vim.fn.winrestview, target_view)
+  end
 
   return winid, target_winid
 end
@@ -1100,7 +1111,6 @@ function M.open(opts)
   state_by_buf[bufnr] = state
   set_keymaps(state)
   attach_autocmds(state)
-  sync_to_target(state)
   fetch_target(state)
 end
 
