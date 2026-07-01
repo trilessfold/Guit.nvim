@@ -12,6 +12,50 @@ local session = require('guit.session')
 
 local M = {}
 
+local function compare_diff_targets(state, entry)
+  local status = (entry.status or ''):sub(1, 1)
+  if status == 'A' then
+    return {
+      edit = { rev = state.right, path = entry.full_path },
+      empty_side = 'left',
+    }
+  end
+  if status == 'D' then
+    return {
+      edit = { rev = state.left, path = entry.old_path or entry.full_path },
+      empty_side = 'right',
+    }
+  end
+  return {
+    edit = { rev = state.right, path = entry.full_path },
+    diff = { rev = state.left, path = entry.old_path or entry.full_path },
+  }
+end
+
+local function fugitive_object(target)
+  if target.rev then
+    return ('%s:%s'):format(target.rev, vim.fn.fnameescape(target.path))
+  end
+  return vim.fn.fnameescape(target.path)
+end
+
+local function open_empty_diff_side(side, label)
+  vim.cmd('diffthis')
+  local file_winid = vim.api.nvim_get_current_win()
+  vim.cmd((side == 'left' and 'leftabove' or 'rightbelow') .. ' vnew')
+  local bufnr = vim.api.nvim_get_current_buf()
+  pcall(vim.api.nvim_buf_set_name, bufnr, ('guit://compare-empty/%s'):format(label or 'empty'))
+  vim.bo[bufnr].buftype = 'nofile'
+  vim.bo[bufnr].bufhidden = 'wipe'
+  vim.bo[bufnr].swapfile = false
+  vim.bo[bufnr].modifiable = false
+  vim.bo[bufnr].readonly = true
+  vim.cmd('diffthis')
+  if vim.api.nvim_win_is_valid(file_winid) then
+    vim.api.nvim_set_current_win(file_winid)
+  end
+end
+
 local function snapshot(state)
   local entry, idx = panel.current_entry(state)
   return {
@@ -33,8 +77,13 @@ local function open_file_diff(state, entry, keep_focus)
     return
   end
   local ok, err = preview.with_managed_preview(state, function()
-    vim.cmd(('Gedit %s:%s'):format(state.right, vim.fn.fnameescape(entry.full_path)))
-    vim.cmd(('Gdiffsplit! %s:%s'):format(state.left, vim.fn.fnameescape(entry.old_path or entry.full_path)))
+    local targets = compare_diff_targets(state, entry)
+    vim.cmd(('Gedit %s'):format(fugitive_object(targets.edit)))
+    if targets.empty_side then
+      open_empty_diff_side(targets.empty_side, entry.full_path)
+    else
+      vim.cmd(('Gdiffsplit! %s'):format(fugitive_object(targets.diff)))
+    end
   end)
   if not ok then
     vim.notify('guit.nvim: failed to open compare diff in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
