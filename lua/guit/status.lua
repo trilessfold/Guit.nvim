@@ -1,3 +1,5 @@
+local git_parse = require('guit.git_parse')
+
 local M = {}
 
 local sections = {
@@ -74,22 +76,6 @@ local function parse_porcelain_z(output)
   return items
 end
 
-local function parse_numstat(output)
-  local stats = {}
-  local total = { additions = 0, deletions = 0 }
-  for _, line in ipairs(vim.split(output or '', '\n', { trimempty = true })) do
-    local add_s, del_s, path = line:match('^(%S+)\t(%S+)\t(.+)$')
-    if add_s and del_s and path then
-      local additions = tonumber(add_s) or 0
-      local deletions = tonumber(del_s) or 0
-      stats[path] = { additions = additions, deletions = deletions }
-      total.additions = total.additions + additions
-      total.deletions = total.deletions + deletions
-    end
-  end
-  return stats, total
-end
-
 function M.enrich_with_numstat(items, staged_stats, unstaged_stats)
   local total = { additions = 0, deletions = 0 }
   for _, item in ipairs(items or {}) do
@@ -123,7 +109,9 @@ function M.fetch(opts, on_done)
 end
 
 function M.fetch_numstat(opts, staged, on_done)
-  local args = { 'git', '--no-pager', 'diff', '--numstat' }
+  -- --find-renames plus -z means a renamed file is reported under both its
+  -- old and its new path, so the worktree_path lookup below always resolves.
+  local args = { 'git', '--no-pager', 'diff', '--numstat', '--find-renames', '-z' }
   if staged then
     args[#args + 1] = '--cached'
   end
@@ -133,7 +121,7 @@ function M.fetch_numstat(opts, staged, on_done)
         on_done(nil, nil, (result.stderr or result.stdout or 'git diff --numstat failed'):gsub('%s+$', ''))
         return
       end
-      local stats, total = parse_numstat(result.stdout)
+      local stats, total = git_parse.numstat_z(result.stdout)
       on_done(stats, total)
     end)
   end)

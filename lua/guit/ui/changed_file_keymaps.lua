@@ -1,5 +1,5 @@
 local changed_files = require('guit.changed_files')
-local config = require('guit.config')
+local keymaps = require('guit.keymaps')
 local panel = require('guit.ui.changed_file_panel')
 local session = require('guit.session')
 
@@ -11,6 +11,8 @@ local function focus_target(state)
   end
 end
 
+--- <CR> on a directory folds it; on a file it opens whatever this pane
+--- considers the file's primary object.
 local function toggle_or_open(state, render, handlers)
   local entry = panel.current_entry(state)
   if not entry then
@@ -26,112 +28,116 @@ local function toggle_or_open(state, render, handlers)
   end
 end
 
+--- Falls back to the plain motion when the tree meaning does not apply, so h
+--- and l still move the cursor in list mode.
+local function tree_or_motion(state, render, motion, action)
+  if state.view_mode ~= 'tree' or not panel.in_entries_area(state) then
+    vim.cmd('normal! ' .. motion)
+    return
+  end
+  action(state, render)
+end
+
 function M.attach(state, render, handlers)
   handlers = handlers or {}
-  local opts = { buffer = state.bufnr, nowait = true, silent = true }
 
-  vim.keymap.set('n', config.options.keymaps.close, function()
-    session.close_active()
-  end, opts)
-
-  if handlers.back then
-    vim.keymap.set('n', config.options.keymaps.back, function()
-      handlers.back(state)
-    end, opts)
-    vim.keymap.set('n', '<BS>', function()
-      handlers.back(state)
-    end, opts)
-  end
-
-  if handlers.refresh then
-    vim.keymap.set('n', config.options.keymaps.refresh, function()
-      handlers.refresh(state)
-    end, opts)
-  end
-
-  vim.keymap.set('n', config.options.keymaps.focus_target, function()
-    focus_target(state)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.toggle_view, function()
-    panel.cycle_view(state, render)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.collapse, function()
-    if state.view_mode ~= 'tree' or not panel.in_entries_area(state) then
-      vim.cmd('normal! h')
-      return
-    end
-    panel.collapse_current(state, render)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.expand, function()
-    if state.view_mode ~= 'tree' or not panel.in_entries_area(state) then
-      vim.cmd('normal! l')
-      return
-    end
-    panel.expand_current(state, render)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.collapse_all, function()
-    panel.set_subtree(state, render, false)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.expand_all, function()
-    panel.set_subtree(state, render, true)
-  end, opts)
-
-  if handlers.help then
-    vim.keymap.set('n', config.options.keymaps.help, function()
-      handlers.help(state)
-    end, opts)
-  end
-
-  vim.keymap.set('n', config.options.keymaps.open, function()
-    toggle_or_open(state, render, handlers)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.split, function()
-    local entry = panel.current_entry(state)
-    if entry and entry.kind == 'file' and handlers.open_file then
-      handlers.open_file(state, entry, false)
-    end
-  end, opts)
-
-  if handlers.open_diff then
-    vim.keymap.set('n', config.options.keymaps.open_diff, function()
-      local entry = panel.current_entry(state)
-      if entry and entry.kind == 'file' then
-        handlers.open_diff(state, entry, true)
+  local bound = {
+    close = function(s)
+      session.close(s)
+    end,
+    focus_target = focus_target,
+    toggle_view = function(s)
+      panel.cycle_view(s, render)
+    end,
+    open = function(s)
+      toggle_or_open(s, render, handlers)
+    end,
+    open_focus = function(s)
+      local entry = panel.current_entry(s)
+      if entry and entry.kind == 'file' and handlers.open_file then
+        handlers.open_file(s, entry, false)
       end
-    end, opts)
+    end,
+    collapse = function(s)
+      tree_or_motion(s, render, 'h', panel.collapse_current)
+    end,
+    expand = function(s)
+      tree_or_motion(s, render, 'l', panel.expand_current)
+    end,
+    collapse_subtree = function(s)
+      panel.set_subtree(s, render, false)
+    end,
+    expand_subtree = function(s)
+      panel.set_subtree(s, render, true)
+    end,
+    collapse_tree = function(s)
+      panel.set_all(s, render, false)
+    end,
+    expand_tree = function(s)
+      panel.set_all(s, render, true)
+    end,
+    jump_parent = function(s)
+      panel.jump_parent(s, render)
+    end,
+    jump_top = function(s)
+      panel.jump_top(s, render)
+    end,
+    jump_next = function(s)
+      panel.jump_sibling(s, render, 1)
+    end,
+    jump_prev = function(s)
+      panel.jump_sibling(s, render, -1)
+    end,
+  }
+
+  -- Optional, pane-specific behaviour.
+  if handlers.back then
+    bound.back = handlers.back
+  end
+  if handlers.refresh then
+    bound.refresh = handlers.refresh
+  end
+  if handlers.open_diff then
+    -- dd follows the configured diff mode; di and ds name one explicitly.
+    local function open_diff(mode)
+      return function(s)
+        local entry = panel.current_entry(s)
+        if entry and entry.kind == 'file' then
+          handlers.open_diff(s, entry, true, mode)
+        end
+      end
+    end
+    bound.open_diff = open_diff(nil)
+    bound.open_diff_inline = open_diff('inline')
+    bound.open_diff_split = open_diff('split')
+  end
+  if handlers.open_show then
+    bound.open_show = handlers.open_show
+  end
+  if handlers.commit then
+    bound.commit = function(s)
+      handlers.commit(s, true)
+    end
+    bound.commit_focus = function(s)
+      handlers.commit(s, false)
+    end
+  end
+  if handlers.yank_hash then
+    bound.yank_hash = handlers.yank_hash
+  end
+  if handlers.cmdline then
+    bound.cmdline = handlers.cmdline
   end
 
-  vim.keymap.set('n', '[z', function()
-    panel.jump_parent(state, render)
-  end, opts)
-  vim.keymap.set('n', 'zP', function()
-    panel.jump_top(state, render)
-  end, opts)
-  vim.keymap.set('n', 'zj', function()
-    panel.jump_sibling(state, render, 1)
-  end, opts)
-  vim.keymap.set('n', 'zJ', function()
-    panel.jump_sibling(state, render, 1)
-  end, opts)
-  vim.keymap.set('n', 'zk', function()
-    panel.jump_sibling(state, render, -1)
-  end, opts)
-  vim.keymap.set('n', 'zK', function()
-    panel.jump_sibling(state, render, -1)
-  end, opts)
+  -- Working tree mutations, wired only by the pane that has a worktree.
+  for _, action in ipairs({ 'stage', 'unstage', 'stage_toggle', 'discard' }) do
+    if handlers[action] then
+      bound[action] = handlers[action]
+    end
+  end
 
-  vim.keymap.set('n', 'zM', function()
-    panel.set_all(state, render, false)
-  end, opts)
-  vim.keymap.set('n', 'zR', function()
-    panel.set_all(state, render, true)
-  end, opts)
+  bound.help = keymaps.help_handler(handlers.title or 'Guit', bound)
+  keymaps.apply(state, bound)
 end
 
 return M

@@ -1,11 +1,50 @@
 local M = {}
 
+--- Reads the worktree path a linked worktree's git dir points back to.
+--- `<main>/.git/worktrees/<name>/gitdir` contains "<worktree>/.git".
+local function linked_worktree(git_dir)
+  local gitdir_file = git_dir .. '/gitdir'
+  if vim.fn.filereadable(gitdir_file) ~= 1 then
+    return nil
+  end
+
+  local line = (vim.fn.readfile(gitdir_file, '', 1) or {})[1]
+  if not line then
+    return nil
+  end
+
+  local worktree = vim.trim(line):gsub('/%.git$', '')
+  return worktree ~= '' and worktree or nil
+end
+
 local function git_toplevel(git_dir)
   if not git_dir or git_dir == '' then
     return nil
   end
 
-  local result = vim.system({ 'git', '--git-dir', git_dir, 'rev-parse', '--show-toplevel' }, { text = true }):wait()
+  -- Derive the worktree from the git dir itself rather than asking git.
+  -- `git --git-dir <dir> rev-parse --show-toplevel` inherits the *caller's* cwd
+  -- for the worktree, so from an unrelated directory it succeeds and returns
+  -- that unrelated directory -- a wrong answer with a zero exit code, which no
+  -- fallback below would ever get to correct.
+  if git_dir:match('/%.git/worktrees/[^/]+$') then
+    local worktree = linked_worktree(git_dir)
+    if worktree then
+      return worktree
+    end
+  end
+
+  if git_dir:match('/%.git$') then
+    return (git_dir:gsub('/%.git$', ''))
+  end
+
+  -- Bare repository or a custom GIT_DIR: git is the only authority, and it
+  -- needs a cwd that actually sits inside the repository.
+  local parent = vim.fn.fnamemodify(git_dir, ':h')
+  local result = vim.system(
+    { 'git', '--git-dir', git_dir, 'rev-parse', '--show-toplevel' },
+    { cwd = vim.fn.isdirectory(parent) == 1 and parent or nil, text = true }
+  ):wait()
   if result.code == 0 then
     local top = (result.stdout or ''):gsub('%s+$', '')
     if top ~= '' then
@@ -13,9 +52,6 @@ local function git_toplevel(git_dir)
     end
   end
 
-  if git_dir:match('/%.git$') then
-    return git_dir:gsub('/%.git$', '')
-  end
   return nil
 end
 

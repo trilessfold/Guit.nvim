@@ -217,7 +217,7 @@ function M.update_winbar(state)
     ' Guit show ',
     '%*',
     '%#' .. config.options.highlights.hash .. '#',
-    ' ' .. commit .. ' ',
+    ' ' .. ui_util.escape_statusline(commit) .. ' ',
     '%*',
     '%=',
     '%#' .. config.options.highlights.counter .. '#',

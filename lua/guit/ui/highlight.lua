@@ -139,6 +139,48 @@ function M.setup()
   local selected = { bg = palette.selected_bg }
   safe_set(config.options.highlights.selected, selected)
   safe_set(config.options.highlights.cursorline, selected)
+
+  M.setup_diff(normal_fg, normal_bg, mode, palette)
+end
+
+local DIFF_GREEN = 0x58c26d
+local DIFF_RED = 0xe06c75
+
+--- The background a Diff* group paints on screen. Schemes in the gruvbox
+--- family set 'reverse' and put the colour in fg; taken as is, that is far
+--- too loud for a whole line, so it is toned down towards Normal. A group
+--- with no colour at all -- Neovim's own DiffDelete -- gets `fallback`.
+local function diff_bg(name, fallback, normal_bg, mode)
+  local group = get_hl(name)
+  if group.reverse and group.fg then
+    return blend(group.fg, normal_bg, mode == 'dark' and 0.30 or 0.22)
+  end
+  return group.bg or blend(fallback, normal_bg, mode == 'dark' and 0.30 or 0.22)
+end
+
+--- Groups for the inline diff overlay, coloured the way VS Code's inline
+--- diff is: green for what the new side has, red for what the old side had,
+--- and a stronger shade of each for the characters that differ.
+---
+--- The line colours come from the scheme's DiffAdd and DiffDelete, so the
+--- overlay matches the user's vimdiff, but only their backgrounds: the
+--- groups are laid over real code, whose syntax colours must show through,
+--- and many schemes give DiffDelete a foreground meant for vimdiff's `---`
+--- filler, unreadable for real text.
+function M.setup_diff(_, normal_bg, mode, palette)
+  local hls = config.options.highlights
+  local add_bg = diff_bg('DiffAdd', DIFF_GREEN, normal_bg, mode)
+  local delete_bg = diff_bg('DiffDelete', DIFF_RED, normal_bg, mode)
+  local text_ratio = mode == 'dark' and 0.45 or 0.35
+
+  safe_set(hls.diff_add, { bg = add_bg })
+  safe_set(hls.diff_add_text, { bg = blend(DIFF_GREEN, add_bg, text_ratio) })
+  safe_set(hls.diff_delete, { bg = delete_bg })
+  safe_set(hls.diff_delete_text, { bg = blend(DIFF_RED, delete_bg, text_ratio) })
+
+  safe_set(hls.diff_sign_add, { fg = palette.added })
+  safe_set(hls.diff_sign_change, { fg = palette.modified })
+  safe_set(hls.diff_sign_delete, { fg = palette.deleted })
 end
 
 return M

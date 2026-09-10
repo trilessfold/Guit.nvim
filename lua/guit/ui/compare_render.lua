@@ -38,14 +38,29 @@ local function format_counts(additions, deletions)
   return string.format('%d %d', additions, deletions)
 end
 
+--- How the compared range should read: two-dot, three-dot, or against the
+--- working tree.
+local function range_label(state)
+  if not state.right or state.right == '' then
+    return state.left .. ' .. working tree'
+  end
+  return state.left .. (state.symmetric and '...' or '..') .. state.right
+end
+
 local function header_lines(state)
   local meta = state.meta or {}
   local left = meta.left or { input = state.left, short_hash = state.left }
-  local right = meta.right or { input = state.right, short_hash = state.right }
+  local right = meta.right
+  if not right then
+    -- An empty right side is the working tree, which has no hash to show.
+    right = (state.right and state.right ~= '')
+      and { input = state.right, short_hash = state.right }
+      or { input = 'working tree' }
+  end
   local lines = {
-    'Compare: ' .. state.left .. '..' .. state.right,
+    'Compare: ' .. range_label(state),
     'Left:    ' .. (left.short_hash or left.input or state.left),
-    'Right:   ' .. (right.short_hash or right.input or state.right),
+    'Right:   ' .. (right.short_hash or right.input or 'working tree'),
   }
 
   if meta.behind ~= nil and meta.ahead ~= nil then
@@ -213,7 +228,7 @@ function M.update_winbar(state)
   end
   vim.wo[state.winid].winbar = table.concat({
     '%#' .. config.options.highlights.title .. '#', ' Guit compare ', '%*',
-    '%#' .. config.options.highlights.hash .. '#', ' ' .. state.left .. '..' .. state.right .. ' ', '%*',
+    '%#' .. config.options.highlights.hash .. '#', ' ' .. ui_util.escape_statusline(range_label(state)) .. ' ', '%*',
     '%=',
     '%#' .. config.options.highlights.counter .. '#', string.format(' %d/%d ', selected, #state.entries), '%*',
     '%#' .. config.options.highlights.date .. '#', ' ' .. state.view_mode .. ' ', '%*',

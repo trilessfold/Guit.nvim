@@ -12,8 +12,34 @@ local function inside_repo(cwd)
   return (out.stdout or ''):gsub('%s+$', '')
 end
 
+-- A directory's repository root does not change while Neovim runs, but
+-- repo_root sits on hot paths (every command, every :Guit completion keystroke,
+-- and every window switch while blame is open) and each miss forks a git
+-- process. Memoise it.
+local repo_root_cache = {}
+
 function M.repo_root(cwd)
-  return inside_repo(cwd or vim.uv.cwd())
+  cwd = cwd or vim.uv.cwd()
+  local cached = repo_root_cache[cwd]
+  if cached then
+    return cached
+  end
+
+  local root, err = inside_repo(cwd)
+  if not root then
+    -- Only successes are memoised: a directory that is not a repository now
+    -- may be one after `git init`, and a cached error would hide that until
+    -- Neovim restarts.
+    return nil, err
+  end
+  repo_root_cache[cwd] = root
+  return root
+end
+
+--- Drops the memoised roots. Only needed if the repository layout changes
+--- underneath a running session.
+function M.clear_repo_root_cache()
+  repo_root_cache = {}
 end
 
 function M.fetch_total_count(opts, on_done)
@@ -45,7 +71,10 @@ function M.fetch_page(opts, on_done)
     '--no-show-signature',
     ('--skip=%d'):format(opts.skip or 0),
     ('-n%d'):format(opts.limit),
-    ('--pretty=format:%s'):format(config.options.git.pretty),
+    -- %P (parent hashes) is prepended rather than folded into config.git.pretty
+    -- so that it sits at a known index whatever the user's display format
+    -- contains; appended, a format with an extra field would shift it.
+    ('--pretty=format:%%P%%x1f%s'):format(config.options.git.pretty),
   }
 
   if opts.rev and opts.rev ~= '' then
@@ -65,14 +94,15 @@ function M.fetch_page(opts, on_done)
       local items = {}
       for _, line in ipairs(vim.split(result.stdout or '', '\n', { trimempty = true })) do
         local parts = vim.split(line, SEP, { plain = true })
-        if #parts >= 6 then
+        if #parts >= 7 then
           items[#items + 1] = {
-            hash = parts[1],
-            short_hash = parts[2],
-            author = parts[3],
-            date = parts[4],
-            refs = parts[5],
-            subject = parts[6],
+            parents = vim.split(parts[1] or '', '%s+', { trimempty = true }),
+            hash = parts[2],
+            short_hash = parts[3],
+            author = parts[4],
+            date = parts[5],
+            refs = parts[6],
+            subject = parts[7],
           }
         end
       end
@@ -102,6 +132,9 @@ function M.fetch_commit_meta(opts, on_done)
       '%ad',
       '%D',
       '%s',
+      -- %P lists the parent hashes: empty for a root commit, several for a
+      -- merge. Callers need it to know whether <commit>^ resolves at all.
+      '%P',
       '%b',
     }, '%x1f')),
     opts.commit,
@@ -119,12 +152,13 @@ function M.fetch_commit_meta(opts, on_done)
 
       local raw = result.stdout or ''
       local parts = vim.split(raw, SEP, { plain = true })
-      if #parts < 7 then
+      if #parts < 8 then
         on_done(nil, 'failed to parse commit metadata')
         return
       end
 
-      local body = table.concat(vim.list_slice(parts, 7), SEP)
+      local parents = vim.split(parts[7] or '', '%s+', { trimempty = true })
+      local body = table.concat(vim.list_slice(parts, 8), SEP)
       on_done({
         hash = parts[1],
         short_hash = parts[2],
@@ -132,6 +166,7 @@ function M.fetch_commit_meta(opts, on_done)
         date = parts[4],
         refs = parts[5],
         subject = parts[6],
+        parents = parents,
         body = (body or ''):gsub('%s+$', ''),
       })
     end)

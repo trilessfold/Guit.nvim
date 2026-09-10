@@ -18,6 +18,25 @@ vim.api.nvim_create_autocmd('ColorScheme', {
   end,
 })
 
+-- di inside fugitive's buffers: the :Git status list and blob objects.
+-- Fugitive announces a loaded object with User FugitiveBlob; the status
+-- buffer only has its filetype.
+local fugitive_group = vim.api.nvim_create_augroup('GuitFugitive', { clear = true })
+vim.api.nvim_create_autocmd('FileType', {
+  group = fugitive_group,
+  pattern = 'fugitive',
+  callback = function(args)
+    require('guit.fugitive_status').attach_status(args.buf)
+  end,
+})
+vim.api.nvim_create_autocmd('User', {
+  group = fugitive_group,
+  pattern = 'FugitiveBlob',
+  callback = function(args)
+    require('guit.fugitive_status').attach_blob(args.buf)
+  end,
+})
+
 vim.api.nvim_create_user_command('Guit', function(opts)
   require('guit').command(opts.fargs, opts)
 end, {

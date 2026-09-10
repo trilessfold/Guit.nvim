@@ -7,53 +7,43 @@ local render = require('guit.ui.compare_render')
 local panel = require('guit.ui.changed_file_panel')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
-local preview = require('guit.ui.preview')
+local diff = require('guit.ui.diff')
 local session = require('guit.session')
 
 local M = {}
 
-local function compare_diff_targets(state, entry)
+local state_by_buf = {}
+
+--- The two sides of a file's change between the compared revisions.
+---
+--- An empty `state.right` is the working tree (`:Guit compare <rev>`), which
+--- the diff module recognises by the missing revision. Added files have no
+--- left side and deleted files no right side.
+local function diff_spec(state, entry)
   local status = (entry.status or ''):sub(1, 1)
+  -- Three-dot lists what `right` changed since the merge base, so that, not
+  -- `left` itself, is the old side of every file; refresh resolves it in the
+  -- background, and a dd that comes first resolves it on the spot.
+  local left_rev = state.left
+  if state.symmetric then
+    if not state.merge_base then
+      local base, err = compare.merge_base({ cwd = state.cwd, left = state.left, right = state.right })
+      if not base then
+        vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
+        return nil
+      end
+      state.merge_base = base
+    end
+    left_rev = state.merge_base
+  end
+  local left = { rev = left_rev, path = entry.old_path or entry.full_path }
+  local right = { rev = state.right, path = entry.full_path }
   if status == 'A' then
-    return {
-      edit = { rev = state.right, path = entry.full_path },
-      empty_side = 'left',
-    }
+    left = nil
+  elseif status == 'D' then
+    right = nil
   end
-  if status == 'D' then
-    return {
-      edit = { rev = state.left, path = entry.old_path or entry.full_path },
-      empty_side = 'right',
-    }
-  end
-  return {
-    edit = { rev = state.right, path = entry.full_path },
-    diff = { rev = state.left, path = entry.old_path or entry.full_path },
-  }
-end
-
-local function fugitive_object(target)
-  if target.rev then
-    return ('%s:%s'):format(target.rev, vim.fn.fnameescape(target.path))
-  end
-  return vim.fn.fnameescape(target.path)
-end
-
-local function open_empty_diff_side(side, label)
-  vim.cmd('diffthis')
-  local file_winid = vim.api.nvim_get_current_win()
-  vim.cmd((side == 'left' and 'leftabove' or 'rightbelow') .. ' vnew')
-  local bufnr = vim.api.nvim_get_current_buf()
-  pcall(vim.api.nvim_buf_set_name, bufnr, ('guit://compare-empty/%s'):format(label or 'empty'))
-  vim.bo[bufnr].buftype = 'nofile'
-  vim.bo[bufnr].bufhidden = 'wipe'
-  vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].modifiable = false
-  vim.bo[bufnr].readonly = true
-  vim.cmd('diffthis')
-  if vim.api.nvim_win_is_valid(file_winid) then
-    vim.api.nvim_set_current_win(file_winid)
-  end
+  return { cwd = state.cwd, left = left, right = right }
 end
 
 local function snapshot(state)
@@ -63,6 +53,7 @@ local function snapshot(state)
     cwd = state.cwd,
     left = state.left,
     right = state.right,
+    symmetric = state.symmetric,
     view_mode = state.view_mode,
     restore = {
       line = idx,
@@ -70,36 +61,49 @@ local function snapshot(state)
     },
   }
 end
-local function open_file_diff(state, entry, keep_focus)
+local function open_file_diff(state, entry, keep_focus, mode)
   if not entry or entry.kind ~= 'file' then return end
-  if vim.fn.exists(':Gedit') ~= 2 or vim.fn.exists(':Gdiffsplit') ~= 2 then
-    vim.notify('guit.nvim: fugitive not found (:Gedit / :Gdiffsplit unavailable)', vim.log.levels.ERROR)
-    return
-  end
-  local ok, err = preview.with_managed_preview(state, function()
-    local targets = compare_diff_targets(state, entry)
-    vim.cmd(('Gedit %s'):format(fugitive_object(targets.edit)))
-    if targets.empty_side then
-      open_empty_diff_side(targets.empty_side, entry.full_path)
-    else
-      vim.cmd(('Gdiffsplit! %s'):format(fugitive_object(targets.diff)))
+  local spec = diff_spec(state, entry)
+  if not spec then return end
+  diff.open(state, spec, { mode = mode, keep_focus = keep_focus })
+end
+
+--- The object a row stands for: the file on the right side, or the right
+--- revision itself on a directory row. Against the working tree the right
+--- side has no revision, so the object is the plain path.
+local function object_of(state, entry)
+  local worktree = not state.right or state.right == ''
+  if entry and entry.kind == 'file' then
+    if worktree then
+      return entry.full_path
     end
-  end)
-  if not ok then
-    vim.notify('guit.nvim: failed to open compare diff in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
-    if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-      vim.api.nvim_set_current_win(state.winid)
-    end
-    return
+    return ('%s:%s'):format(state.right, entry.full_path)
   end
-  if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-    vim.api.nvim_set_current_win(state.winid)
-  end
+  return worktree and state.left or state.right
+end
+
+--- The revision arguments every compare fetch shares.
+local function range_of(state)
+  return { cwd = state.cwd, left = state.left, right = state.right, symmetric = state.symmetric }
 end
 
 local function refresh(state)
-  compare.fetch_changed_files({ cwd = state.cwd, left = state.left, right = state.right }, function(items, err)
+  state.generation = (state.generation or 0) + 1
+  local generation = state.generation
+  state.merge_base = nil
+  if state.symmetric then
+    compare.fetch_merge_base(range_of(state), function(base, err)
+      if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+      if generation ~= state.generation then return end
+      if err then vim.notify('guit.nvim: ' .. err, vim.log.levels.WARN); return end
+      state.merge_base = base
+    end)
+  end
+  compare.fetch_changed_files(range_of(state), function(items, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+    -- Results of a superseded refresh must not be applied on top of the list a
+    -- newer one already installed.
+    if generation ~= state.generation then return end
     if err then vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR); return end
     state.items = items or {}
     local function apply_items()
@@ -107,8 +111,9 @@ local function refresh(state)
       panel.rerender(state, render)
     end
     if config.options.show.show_counts then
-      compare.fetch_numstat({ cwd = state.cwd, left = state.left, right = state.right }, function(stats, total, stats_err)
+      compare.fetch_numstat(range_of(state), function(stats, total, stats_err)
         if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+        if generation ~= state.generation then return end
         if stats_err then
           vim.notify('guit.nvim: ' .. stats_err, vim.log.levels.WARN)
           state.summary = { additions = 0, deletions = 0 }
@@ -124,8 +129,9 @@ local function refresh(state)
       apply_items()
     end
   end)
-  compare.fetch_meta({ cwd = state.cwd, left = state.left, right = state.right }, function(meta, err)
+  compare.fetch_meta(range_of(state), function(meta, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+    if generation ~= state.generation then return end
     if err then vim.notify('guit.nvim: ' .. err, vim.log.levels.WARN); return end
     state.meta = meta
     panel.rerender(state, render, (panel.current_entry(state) or {}).full_path)
@@ -146,42 +152,32 @@ local function attach_autocmds(state)
     group = group, buffer = state.bufnr,
     callback = function()
       session.clear(state)
+      state_by_buf[state.bufnr] = nil
       pcall(vim.api.nvim_del_augroup_by_id, group)
     end,
   })
 end
 
-local function help()
-  vim.notify(table.concat({
-    'Guit compare help', '',
-    '  <CR>  open file diff between compared revisions and keep focus here',
-    '  o     open file diff and move focus to target window',
-    '  <Tab> jump to target window',
-    '  [z    jump to parent directory',
-    '  zP    jump to top-level directory for the current branch',
-    '  zj/zJ jump to next sibling entry',
-    '  zk/zK jump to previous sibling entry',
-    '  t     toggle tree/list',
-    '  h/l   collapse/expand current directory',
-    '  H/L   collapse/expand current subtree',
-    '  zM/zR collapse/expand whole tree',
-    '  r     refresh',
-    '  q     close pane',
-  }, '\n'), vim.log.levels.INFO, { title = 'guit.nvim' })
-end
 
 local function set_keymaps(state)
   keymaps.attach(state, render, {
+    title = 'Guit compare',
     refresh = refresh,
-    help = help,
     open_file = open_file_diff,
+    open_diff = open_file_diff,
+    yank_hash = function(s)
+      ui_util.yank(object_of(s, panel.current_entry(s)))
+    end,
+    cmdline = function(s)
+      ui_util.put_on_cmdline(object_of(s, panel.current_entry(s)))
+    end,
   })
 end
 
 function M.open(opts)
   highlights.setup()
   local bufnr = vim.api.nvim_create_buf(false, true)
-  vim.bo[bufnr].buftype = 'nofile'; vim.bo[bufnr].bufhidden = 'wipe'; vim.bo[bufnr].swapfile = false; vim.bo[bufnr].filetype = 'guitcompare'; vim.bo[bufnr].modifiable = false; vim.bo[bufnr].readonly = true
+  vim.bo[bufnr].buftype = 'nofile'; vim.bo[bufnr].bufhidden = 'wipe'; vim.bo[bufnr].swapfile = false; vim.bo[bufnr].modifiable = false; vim.bo[bufnr].readonly = true
   local winid = opts.reuse_winid
   local target_winid = opts.target_winid
   if winid and vim.api.nvim_win_is_valid(winid) then
@@ -192,7 +188,7 @@ function M.open(opts)
   end
   local state = {
     bufnr = bufnr, winid = winid, target_winid = target_winid, cwd = opts.cwd,
-    left = opts.left, right = opts.right,
+    left = opts.left, right = opts.right, symmetric = opts.symmetric,
     ns = vim.api.nvim_create_namespace(('guit-compare-%d'):format(bufnr)),
     selection_ns = vim.api.nvim_create_namespace(('guit-compare-select-%d'):format(bufnr)),
     view_mode = opts.view_mode or config.options.show.default_view,
@@ -200,12 +196,28 @@ function M.open(opts)
     restore = opts.restore, restore_done = false,
     preview = opts.preview or { anchor_winid = target_winid, extra_wins = {}, buffers = {} },
   }
+  state_by_buf[bufnr] = state
   session.register(state, snapshot)
   attach_autocmds(state)
   set_keymaps(state)
+  -- Set last: FileType fires here, so after/ftplugin/guitcompare.lua runs
+  -- after the plugin's own mappings and can override them.
+  vim.bo[bufnr].filetype = 'guitcompare'
   render.update_winbar(state)
   ui_util.set_readonly(bufnr, true)
   refresh(state)
+end
+
+--- Re-attaches a pane that was hidden while another view borrowed its window.
+function M.activate(bufnr, winid)
+  local state = state_by_buf[bufnr]
+  if not state then
+    return
+  end
+  state.winid = winid or state.winid
+  session.register(state, snapshot)
+  render.update_selected_line(state)
+  render.update_winbar(state)
 end
 
 return M

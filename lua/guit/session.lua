@@ -1,6 +1,14 @@
 local M = {}
 
-local active = nil
+-- Every open Guit pane, keyed by its buffer. A single global slot meant the
+-- second pane to open silently replaced the first: `q` in the older pane then
+-- closed the newer one, and the older pane became unreachable to :Guit toggle.
+local panes = {}
+
+-- The pane :Guit toggle acts on: whichever was focused most recently.
+local active_bufnr = nil
+
+-- Snapshot of the last pane state, so toggle can recreate a closed view.
 local last = nil
 
 local function valid_win(winid)
@@ -21,44 +29,111 @@ local function remember(snapshot)
   end
 end
 
+local function entry_for(state)
+  local entry = state and panes[state.bufnr]
+  if entry and entry.state == state then
+    return entry
+  end
+  return nil
+end
+
+--- Wipes the pane a view was opened from, if it is still hidden.
+---
+--- Opening `Guit show` from a log pane sets the log buffer to bufhidden=hide so
+--- `-` can return to it. On the path where the user never goes back, nothing
+--- used to wipe it, so its buffer, its state entry and its augroup survived for
+--- the rest of the session -- one leak per log -> show -> q cycle.
+local function release_origin(state)
+  local origin = state and state.source_log
+  local bufnr = origin and origin.bufnr
+  if not valid_buf(bufnr) then
+    return
+  end
+  -- Still on screen somewhere: it is not ours to reclaim.
+  if vim.fn.bufwinid(bufnr) ~= -1 then
+    return
+  end
+  if vim.bo[bufnr].modified then
+    return
+  end
+  pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+end
+
 function M.register(state, snapshot_fn)
-  active = {
+  panes[state.bufnr] = {
     bufnr = state.bufnr,
     winid = state.winid,
     state = state,
     snapshot_fn = snapshot_fn,
   }
+  active_bufnr = state.bufnr
   remember(snapshot_fn(state))
 end
 
 function M.update(state)
-  if not active or active.state ~= state or not active.snapshot_fn then
+  local entry = entry_for(state)
+  if not entry or not entry.snapshot_fn then
     return
   end
-  remember(active.snapshot_fn(state))
+  -- Entering a pane makes it the one toggle and `q` act on, so returning to an
+  -- older pane hands control back to it.
+  entry.winid = state.winid
+  active_bufnr = state.bufnr
+  remember(entry.snapshot_fn(state))
 end
 
 function M.clear(state)
-  if active and active.state == state then
-    active = nil
+  local entry = entry_for(state)
+  if not entry then
+    return
   end
+  panes[state.bufnr] = nil
+  if active_bufnr == state.bufnr then
+    active_bufnr = nil
+  end
+  -- The pane is being wiped; its origin cannot be reached any more.
+  vim.schedule(function()
+    release_origin(state)
+    require('guit.ui.inline_diff').detach_owned(state)
+  end)
 end
 
-function M.close_active()
-  if not active or not valid_win(active.winid) then
-    active = nil
+local function close_entry(entry)
+  if not entry or not valid_win(entry.winid) then
     return false
   end
 
-  if active.snapshot_fn then
-    remember(active.snapshot_fn(active.state))
+  if entry.snapshot_fn then
+    remember(entry.snapshot_fn(entry.state))
   end
-  if valid_buf(active.bufnr) then
-    vim.bo[active.bufnr].bufhidden = 'wipe'
+  release_origin(entry.state)
+  require('guit.ui.inline_diff').detach_owned(entry.state)
+  if valid_buf(entry.bufnr) then
+    vim.bo[entry.bufnr].bufhidden = 'wipe'
   end
-  vim.api.nvim_win_close(active.winid, true)
-  active = nil
+  vim.api.nvim_win_close(entry.winid, true)
+
+  panes[entry.bufnr] = nil
+  if active_bufnr == entry.bufnr then
+    active_bufnr = nil
+  end
   return true
+end
+
+--- Closes one specific pane. This is what `q` inside a pane must call, so it
+--- always closes the pane the key was pressed in.
+function M.close(state)
+  return close_entry(entry_for(state))
+end
+
+--- Closes the most recently focused pane. Used by :Guit toggle.
+function M.close_active()
+  local entry = active_bufnr and panes[active_bufnr]
+  if not entry then
+    active_bufnr = nil
+    return false
+  end
+  return close_entry(entry)
 end
 
 local function restore_log(snapshot, opts)
@@ -112,6 +187,7 @@ local function restore_compare(snapshot, opts)
     cwd = snapshot.cwd,
     left = snapshot.left,
     right = snapshot.right,
+    symmetric = snapshot.symmetric,
     view_mode = snapshot.view_mode,
     restore = snapshot.restore,
     reuse_winid = opts.reuse_winid,
@@ -147,8 +223,9 @@ function M.open_snapshot(snapshot, opts)
 end
 
 function M.restore(default_open)
-  if active and valid_win(active.winid) then
-    vim.api.nvim_set_current_win(active.winid)
+  local entry = active_bufnr and panes[active_bufnr]
+  if entry and valid_win(entry.winid) then
+    vim.api.nvim_set_current_win(entry.winid)
     return true
   end
 
@@ -176,7 +253,8 @@ function M.toggle(default_open)
 end
 
 function M.has_active()
-  return active ~= nil and valid_win(active.winid) and valid_buf(active.bufnr)
+  local entry = active_bufnr and panes[active_bufnr]
+  return entry ~= nil and valid_win(entry.winid) and valid_buf(entry.bufnr)
 end
 
 return M

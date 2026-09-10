@@ -3,6 +3,7 @@
 :Guit-history	guit.txt	/*:Guit-history*
 :Guit-history-percent	guit.txt	/*:Guit-history-percent*
 :Guit-history-range	guit.txt	/*:Guit-history-range*
+:Guit-inline	guit.txt	/*:Guit-inline*
 :Guit-log	guit.txt	/*:Guit-log*
 :Guit-show	guit.txt	/*:Guit-show*
 :Guit-show-percent	guit.txt	/*:Guit-show-percent*
@@ -13,11 +14,15 @@ guit-blame	guit.txt	/*guit-blame*
 guit-commands	guit.txt	/*guit-commands*
 guit-compare	guit.txt	/*guit-compare*
 guit-config	guit.txt	/*guit-config*
+guit-fugitive	guit.txt	/*guit-fugitive*
 guit-history	guit.txt	/*guit-history*
+guit-inline-diff	guit.txt	/*guit-inline-diff*
+guit-keymaps	guit.txt	/*guit-keymaps*
 guit-log	guit.txt	/*guit-log*
 guit-notes	guit.txt	/*guit-notes*
 guit-show	guit.txt	/*guit-show*
 guit-show_counts	guit.txt	/*guit-show_counts*
+guit-staging	guit.txt	/*guit-staging*
 guit-status	guit.txt	/*guit-status*
 guit-toggle	guit.txt	/*guit-toggle*
 guit.txt	guit.txt	/*guit.txt*

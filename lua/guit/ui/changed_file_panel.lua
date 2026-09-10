@@ -245,44 +245,6 @@ function M.set_all(state, render, expand)
   M.rerender(state, render)
 end
 
-function M.collapse_branch(state, render)
-  if state.view_mode ~= 'tree' then
-    return
-  end
-  local entry = M.current_entry(state)
-  if not entry then
-    return
-  end
-
-  if entry.kind == 'dir' then
-    changed_files.collapse_chain(state.tree_state, entry.full_path)
-    M.rerender(state, render, entry.full_path)
-    return
-  end
-
-  local parent = changed_files.parent_dir(entry.full_path)
-  if parent then
-    changed_files.collapse_chain(state.tree_state, parent)
-    M.rerender(state, render, parent)
-  end
-end
-
-function M.expand_branch(state, render)
-  if state.view_mode ~= 'tree' then
-    return
-  end
-  local entry = M.current_entry(state)
-  if not entry then
-    return
-  end
-
-  local target = entry.kind == 'dir' and entry.full_path or changed_files.parent_dir(entry.full_path)
-  if target then
-    changed_files.expand_chain(state.tree_state, target)
-    M.rerender(state, render, entry.full_path)
-  end
-end
-
 function M.jump_parent(state, render)
   if state.view_mode ~= 'tree' then
     return

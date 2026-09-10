@@ -8,6 +8,7 @@ local panel = require('guit.ui.changed_file_panel')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
+local diff = require('guit.ui.diff')
 local session = require('guit.session')
 
 local M = {}
@@ -55,33 +56,18 @@ local function return_to_log(state)
   local line = math.max(1, math.min(origin.line or 1, vim.api.nvim_buf_line_count(origin.bufnr)))
   vim.api.nvim_win_set_cursor(winid, { line, 0 })
   vim.api.nvim_set_current_win(winid)
-  local ft = vim.bo[origin.bufnr].filetype
-  if ft == 'guitlog' then
-    require('guit.ui.buffer').activate(origin.bufnr, winid)
-  elseif ft == 'guithistory' then
-    require('guit.ui.history_buffer').activate(origin.bufnr, winid)
+  local activators = {
+    guitlog = 'guit.ui.buffer',
+    guithistory = 'guit.ui.history_buffer',
+    guitcompare = 'guit.ui.compare_buffer',
+    guitstatus = 'guit.ui.status_buffer',
+  }
+  local module = activators[vim.bo[origin.bufnr].filetype]
+  if module then
+    require(module).activate(origin.bufnr, winid)
   end
 end
 
-local function bind_back_navigation(state, bufnr)
-  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-
-  if vim.b[bufnr].guit_show_bufnr == state.bufnr then
-    return
-  end
-
-  vim.b[bufnr].guit_show_bufnr = state.bufnr
-  vim.keymap.set('n', '<C-o>', function()
-    return_to_panel(state)
-  end, {
-    buffer = bufnr,
-    silent = true,
-    nowait = true,
-    desc = 'Return to Guit show',
-  })
-end
 
 local function snapshot(state)
   local entry, idx = panel.current_entry(state)
@@ -103,40 +89,45 @@ local function snapshot(state)
   }
 end
 
-local function open_file_diff(state, entry, keep_focus)
+--- The two sides of a file's change in this commit.
+---
+--- A root commit has no parent, so nothing is on the left; an added file has
+--- nothing there either, and a deleted one has nothing on the right. Building
+--- a `<commit>^:path` object for those would fail inside fugitive.
+local function diff_spec(state, entry)
+  local status = (entry.status or ''):sub(1, 1)
+  -- The file list usually lands before the commit metadata; until it does,
+  -- ask git directly rather than assume a parent exists.
+  local root
+  if state.meta and state.meta.parents then
+    root = diff.is_root_commit(state.meta.parents)
+  else
+    root = not changed_files.has_parent(state.cwd, state.commit)
+  end
+  local left = { rev = changed_files.parent_of(state.commit), path = entry.old_path or entry.full_path }
+  local right = { rev = state.commit, path = entry.full_path }
+  if status == 'D' then
+    right = nil
+  elseif status == 'A' or root then
+    left = nil
+  end
+  return { cwd = state.cwd, left = left, right = right }
+end
+
+local function open_file_diff(state, entry, keep_focus, mode)
   if not entry or entry.kind ~= 'file' then
     return
   end
-
-  if vim.fn.exists(':Gedit') ~= 2 or vim.fn.exists(':Gdiffsplit') ~= 2 then
-    vim.notify('guit.nvim: fugitive not found (:Gedit / :Gdiffsplit unavailable)', vim.log.levels.ERROR)
-    return
-  end
-
-  local ok, err = preview.with_managed_preview(state, function()
-    vim.cmd(('Gedit %s:%s'):format(state.commit, vim.fn.fnameescape(entry.full_path)))
-    vim.cmd(('Gdiffsplit! %s:%s'):format(
-      changed_files.parent_of(state.commit),
-      vim.fn.fnameescape(entry.old_path or entry.full_path)
-    ))
-  end)
-  if not ok then
-    vim.notify('guit.nvim: failed to open file diff in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
-    if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-      vim.api.nvim_set_current_win(state.winid)
-    end
-    return
-  end
-  bind_back_navigation(state, vim.api.nvim_get_current_buf())
-
-  if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-    vim.api.nvim_set_current_win(state.winid)
-  end
+  diff.open(state, diff_spec(state, entry), { mode = mode, keep_focus = keep_focus })
 end
 
 local function fetch_meta(state)
+  local generation = state.generation or 0
   git.fetch_commit_meta({ cwd = state.cwd, commit = state.commit }, function(meta, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then
+      return
+    end
+    if generation ~= (state.generation or 0) then
       return
     end
     if err then
@@ -149,8 +140,15 @@ local function fetch_meta(state)
 end
 
 local function refresh(state)
+  state.generation = (state.generation or 0) + 1
+  local generation = state.generation
   changed_files.fetch_changed_files({ cwd = state.cwd, commit = state.commit }, function(items, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then
+      return
+    end
+    -- Results of a superseded refresh must not be applied on top of the
+    -- list a newer one already installed.
+    if generation ~= state.generation then
       return
     end
 
@@ -169,6 +167,9 @@ local function refresh(state)
     if config.options.show.show_counts then
       changed_files.fetch_numstat({ cwd = state.cwd, commit = state.commit }, function(stats, total, stats_err)
         if not vim.api.nvim_buf_is_valid(state.bufnr) then
+          return
+        end
+        if generation ~= state.generation then
           return
         end
         if stats_err then
@@ -190,40 +191,6 @@ local function refresh(state)
   fetch_meta(state)
 end
 
-local function show_help(state)
-  local lines = {
-    'Guit show help',
-    '',
-    'Navigation',
-    '  <CR>  open file diff in target window and keep focus here',
-    '  o     open file diff in target window and move there',
-    '  <Tab> jump to target window',
-    '  -     return to the originating Guit log buffer when available',
-    '  [z    jump to parent directory',
-    '  zP    jump to top-level directory for the current branch',
-    '  zj/zJ jump to next sibling entry',
-    '  zk/zK jump to previous sibling entry',
-    '',
-    'Views',
-    '  t     toggle tree/list',
-    '  h     collapse current directory; if already closed, collapse parent',
-    '  l     expand current directory; if already open, jump into first child',
-    '  H     collapse the current subtree',
-    '  L     expand the current subtree',
-    '',
-    'Fold-like',
-    '  zM    collapse whole tree',
-    '  zR    expand whole tree',
-    '',
-    'Other',
-    '  r     refresh',
-    '  q     close pane',
-    '  ?     show this help',
-    '',
-    'See :help guit for full documentation.',
-  }
-  vim.notify(table.concat(lines, '\n'), vim.log.levels.INFO, { title = 'guit.nvim' })
-end
 
 local function attach_autocmds(state)
   local group = vim.api.nvim_create_augroup(('GuitShow_%d'):format(state.bufnr), { clear = true })
@@ -249,12 +216,45 @@ local function attach_autocmds(state)
   })
 end
 
+local function open_commit_object(state, keep_focus)
+  if vim.fn.exists(':Gedit') ~= 2 then
+    vim.notify('guit.nvim: fugitive not found (:Gedit unavailable)', vim.log.levels.ERROR)
+    return
+  end
+  local ok, err = preview.with_managed_preview(state, function()
+    vim.cmd(('Gedit %s'):format(state.commit))
+  end)
+  if not ok then
+    vim.notify('guit.nvim: failed to open commit in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
+  end
+  if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
+    vim.api.nvim_set_current_win(state.winid)
+  end
+end
+
 local function set_keymaps(state)
   keymaps.attach(state, render, {
+    title = 'Guit show',
     back = return_to_log,
     refresh = refresh,
-    help = show_help,
     open_file = open_file_diff,
+    -- dd always means "diff", in every pane.
+    open_diff = open_file_diff,
+    commit = open_commit_object,
+    -- The object of a row here is the file at this commit, which is both a
+    -- valid fugitive object and a valid git revision.
+    yank_hash = function(s)
+      local entry = panel.current_entry(s)
+      ui_util.yank(entry and entry.kind == 'file'
+        and ('%s:%s'):format(s.commit, entry.full_path)
+        or s.commit)
+    end,
+    cmdline = function(s)
+      local entry = panel.current_entry(s)
+      ui_util.put_on_cmdline(entry and entry.kind == 'file'
+        and ('%s:%s'):format(s.commit, entry.full_path)
+        or s.commit)
+    end,
   })
 end
 
@@ -265,7 +265,6 @@ function M.open(opts)
   vim.bo[bufnr].buftype = 'nofile'
   vim.bo[bufnr].bufhidden = 'wipe'
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].filetype = 'guitshow'
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].readonly = true
 
@@ -308,6 +307,9 @@ function M.open(opts)
   session.register(state, snapshot)
   attach_autocmds(state)
   set_keymaps(state)
+  -- Set last: FileType fires here, so after/ftplugin/guitshow.lua runs after the
+  -- plugin's own mappings and can override them.
+  vim.bo[bufnr].filetype = 'guitshow'
   render.update_winbar(state)
   ui_util.set_readonly(bufnr, true)
   refresh(state)

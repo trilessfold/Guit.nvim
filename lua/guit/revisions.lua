@@ -74,7 +74,7 @@ end
 local function subcommand_matches(arglead)
   return vim.tbl_filter(function(item)
     return arglead == '' or vim.startswith(item, arglead)
-  end, { 'toggle', 'log', 'show', 'history', 'compare', 'status', 'blame' })
+  end, { 'toggle', 'log', 'show', 'history', 'compare', 'status', 'blame', 'inline' })
 end
 
 function M.complete(arglead, cmdline, cwd)
@@ -96,7 +96,7 @@ function M.complete(arglead, cmdline, cwd)
       table.insert(items, 1, '%')
     end
     return items
-  elseif sub == 'log' then
+  elseif sub == 'log' or sub == 'inline' then
     return M.complete_refs(arglead, cwd)
   elseif sub == 'history' then
     local items = vim.fn.getcompletion(arglead, 'file')

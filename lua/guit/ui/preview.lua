@@ -21,6 +21,27 @@ local function snapshot_windows(tabpage)
   return wins
 end
 
+local function snapshot_buffers()
+  local bufs = {}
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    bufs[bufnr] = true
+  end
+  return bufs
+end
+
+--- A preview buffer may only be discarded if Guit created it and the user has
+--- not since typed into it. Anything else -- a file they already had open, an
+--- unsaved edit, a terminal -- belongs to the user, not to the preview.
+local function safe_to_discard(bufnr)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
+    return false
+  end
+  if vim.bo[bufnr].modified then
+    return false
+  end
+  return true
+end
+
 local function pick_anchor(state)
   local preview = state.preview or {}
   local candidates = {
@@ -70,6 +91,11 @@ function M.begin(state)
   local preview = M.ensure_state(state)
   local anchor_winid = pick_anchor(state)
 
+  -- An inline diff drawn on a buffer the user had open anyway is not ours to
+  -- delete, but it is ours to clean up: the next thing previewed must not
+  -- leave the old one still looking like a diff.
+  require('guit.ui.inline_diff').detach_owned(state)
+
   for _, winid in ipairs(preview.extra_wins or {}) do
     if winid ~= anchor_winid and vim.api.nvim_win_is_valid(winid) then
       pcall(vim.api.nvim_win_close, winid, true)
@@ -78,7 +104,9 @@ function M.begin(state)
 
   local visible = visible_buffers({ state.winid })
   for _, bufnr in ipairs(preview.buffers or {}) do
-    if bufnr and vim.api.nvim_buf_is_valid(bufnr) and not visible[bufnr] then
+    if not visible[bufnr] and safe_to_discard(bufnr) then
+      -- force only discards the buffer, never unsaved text: safe_to_discard
+      -- has already rejected anything modified.
       pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
     end
   end
@@ -92,11 +120,17 @@ function M.begin(state)
     anchor_winid = anchor_winid,
     tabpage = vim.api.nvim_get_current_tabpage(),
     before_windows = snapshot_windows(vim.api.nvim_get_current_tabpage()),
+    before_buffers = snapshot_buffers(),
   }
 end
 
 function M.finish(state, ctx)
   local preview = M.ensure_state(state)
+  -- finish also runs after a failed action, which may have taken the tab page
+  -- with it; there is nothing left to track then.
+  if ctx.tabpage and not vim.api.nvim_tabpage_is_valid(ctx.tabpage) then
+    return
+  end
   local anchor_winid = ctx.anchor_winid
   if not anchor_winid or not vim.api.nvim_win_is_valid(anchor_winid) then
     anchor_winid = state.target_winid
@@ -114,13 +148,22 @@ function M.finish(state, ctx)
     end
   end
 
-  if anchor_winid and vim.api.nvim_win_is_valid(anchor_winid) then
-    buffers[#buffers + 1] = vim.api.nvim_win_get_buf(anchor_winid)
-  end
-  for _, winid in ipairs(extra_wins) do
-    if vim.api.nvim_win_is_valid(winid) then
-      buffers[#buffers + 1] = vim.api.nvim_win_get_buf(winid)
+  -- Ownership, not visibility: a buffer that already existed before this
+  -- action ran was opened by the user and must never be reclaimed by us.
+  local before = ctx.before_buffers or {}
+  local function claim(winid)
+    if not winid or not vim.api.nvim_win_is_valid(winid) then
+      return
     end
+    local bufnr = vim.api.nvim_win_get_buf(winid)
+    if not before[bufnr] then
+      buffers[#buffers + 1] = bufnr
+    end
+  end
+
+  claim(anchor_winid)
+  for _, winid in ipairs(extra_wins) do
+    claim(winid)
   end
 
   preview.anchor_winid = anchor_winid
@@ -137,8 +180,10 @@ function M.with_managed_preview(state, fn)
       fn(ctx.anchor_winid)
     end)
   end)
+  -- Track whatever the action managed to open before it failed; otherwise
+  -- those windows and buffers are orphaned and never cleaned up.
+  M.finish(state, ctx)
   if ok then
-    M.finish(state, ctx)
     return true
   end
   return false, err

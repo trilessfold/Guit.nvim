@@ -7,6 +7,8 @@ local show_buffer = require('guit.ui.show_buffer')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
+local diff = require('guit.ui.diff')
+local keymaps = require('guit.keymaps')
 local session = require('guit.session')
 
 local M = {}
@@ -84,6 +86,7 @@ local function restore_cursor(state)
 end
 
 local function should_prefetch(state)
+  if state.fetch_failed then return false end
   local line = current_line(state)
   if not line then return false end
   if #state.items == 0 then return true end
@@ -97,18 +100,6 @@ local function focus_target_window(state)
   end
 end
 
-local function bind_back_navigation(state, bufnr)
-  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
-  if vim.b[bufnr].guit_history_bufnr == state.bufnr then return end
-  vim.b[bufnr].guit_history_bufnr = state.bufnr
-  vim.keymap.set('n', '<C-o>', function()
-    if state.winid and vim.api.nvim_win_is_valid(state.winid) then
-      vim.api.nvim_set_current_win(state.winid)
-    elseif state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
-      vim.cmd('buffer ' .. state.bufnr)
-    end
-  end, { buffer = bufnr, silent = true, nowait = true, desc = 'Return to Guit history' })
-end
 
 local function open_commit(state, commit, opts)
   opts = opts or {}
@@ -123,7 +114,6 @@ local function open_commit(state, commit, opts)
       end
       return
     end
-    bind_back_navigation(state, vim.api.nvim_get_current_buf())
   else
     vim.notify('guit.nvim: fugitive not found (:Gedit unavailable)', vim.log.levels.WARN)
   end
@@ -133,37 +123,28 @@ local function open_commit(state, commit, opts)
   end
 end
 
-local function open_file_diff_for_history(state, item, keep_focus)
+--- The two sides of the file's change in the selected commit. The first
+--- commit of the repository has no parent side; a commit that added the file
+--- has none either, and one that deleted it has no commit side.
+local function history_diff_spec(state, item)
+  local path = item.path or state.path
+  local status = (item.status or ''):sub(1, 1)
+  local left = { rev = item.hash .. '^', path = item.old_path or path }
+  local right = { rev = item.hash, path = path }
+  if status == 'D' then
+    right = nil
+  elseif status == 'A' or diff.is_root_commit(item.parents) then
+    left = nil
+  end
+  return { cwd = state.cwd, left = left, right = right }
+end
+
+local function open_file_diff_for_history(state, item, keep_focus, mode)
   if not state.is_file then
     open_commit(state, item.hash, { keep_focus = keep_focus })
     return
   end
-
-  if vim.fn.exists(':Gedit') ~= 2 or vim.fn.exists(':Gdiffsplit') ~= 2 then
-    vim.notify('guit.nvim: fugitive not found (:Gedit / :Gdiffsplit unavailable)', vim.log.levels.ERROR)
-    return
-  end
-
-  local commit = item.hash
-  local path = item.path or state.path
-  local parent_path = item.old_path or path
-
-  local ok, err = preview.with_managed_preview(state, function()
-    vim.cmd(('Gedit %s:%s'):format(commit, vim.fn.fnameescape(path)))
-    vim.cmd(('Gdiffsplit! %s^:%s'):format(commit, vim.fn.fnameescape(parent_path)))
-  end)
-  if not ok then
-    vim.notify('guit.nvim: failed to open file diff in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
-    if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-      vim.api.nvim_set_current_win(state.winid)
-    end
-    return
-  end
-  bind_back_navigation(state, vim.api.nvim_get_current_buf())
-
-  if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-    vim.api.nvim_set_current_win(state.winid)
-  end
+  diff.open(state, history_diff_spec(state, item), { mode = mode, keep_focus = keep_focus })
 end
 
 local function open_file_revision_for_history(state, item, keep_focus)
@@ -189,7 +170,6 @@ local function open_file_revision_for_history(state, item, keep_focus)
     end
     return
   end
-  bind_back_navigation(state, vim.api.nvim_get_current_buf())
 
   if keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
     vim.api.nvim_set_current_win(state.winid)
@@ -228,6 +208,7 @@ local function fetch_more(state, force)
   if not force and not should_prefetch(state) then return end
 
   state.loading = true
+  local generation = state.generation or 0
   render.set_loading_line(state, state.line_range and '… loading line history …' or '… loading file history …')
   render.update_winbar(state)
 
@@ -241,9 +222,13 @@ local function fetch_more(state, force)
     limit = page_size_for(state.winid),
   }, function(payload, err)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then return end
+    -- A refresh happened while this page was in flight; its results belong to
+    -- a list that no longer exists.
+    if generation ~= (state.generation or 0) then return end
     state.loading = false
     render.clear_loading_line(state)
     if err then
+      state.fetch_failed = true
       render.update_winbar(state)
       vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
       return
@@ -264,9 +249,11 @@ local function fetch_more(state, force)
 end
 
 local function refresh(state)
+  state.generation = (state.generation or 0) + 1
   state.items = {}
   state.eof = false
   state.loading = false
+  state.fetch_failed = false
   state.loading_row = nil
   ui_util.with_modifiable(state.bufnr, function()
     vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, {})
@@ -328,51 +315,57 @@ local function open_show_from_history(state)
 end
 
 local function set_keymaps(state)
-  local opts = { buffer = state.bufnr, nowait = true, silent = true }
-  vim.keymap.set('n', config.options.keymaps.close, function()
-    session.close_active()
-  end, opts)
-  vim.keymap.set('n', config.options.keymaps.refresh, function() refresh(state) end, opts)
-  vim.keymap.set('n', config.options.keymaps.open, function()
-    local item = get_current_item(state)
-    if item then open_primary(state, item, true) end
-  end, opts)
-  vim.keymap.set('n', config.options.keymaps.split, function()
-    local item = get_current_item(state)
-    if item then open_primary(state, item, false) end
-  end, opts)
-  vim.keymap.set('n', config.options.keymaps.commit, function()
-    local item = get_current_item(state)
-    if item then open_commit(state, item.hash, { keep_focus = true }) end
-  end, opts)
-  vim.keymap.set('n', config.options.keymaps.commit_focus, function()
-    local item = get_current_item(state)
-    if item then open_commit(state, item.hash, { keep_focus = false }) end
-  end, opts)
-  vim.keymap.set('n', config.options.keymaps.open_show, function() open_show_from_history(state) end, opts)
-  vim.keymap.set('n', config.options.keymaps.focus_target, function() focus_target_window(state) end, opts)
-  vim.keymap.set('n', config.options.keymaps.help, function()
-    vim.notify(table.concat({
-      'Guit history help', '',
-      (state.line_range and '  <CR>  open file revision for this line range and keep focus here'
-        or (state.is_file and '  <CR>  open diff for this file in the selected commit and keep focus here' or '  <CR>  open commit in target window and keep focus here')),
-      (state.line_range and '  o     open file revision and move focus to target window'
-        or (state.is_file and '  o     open file diff and move focus to target window' or '  o     open commit and move focus to target window')),
-      '  c     open commit in fugitive and keep focus here',
-      '  C     open commit in fugitive and move focus to target window',
-      '  s     open Guit show for the current commit in the lower pane',
-      '  <Tab> jump to target window',
-      '  r     refresh history',
-      '  q     close pane',
-      '  gg    jump to top',
-      '  G     jump to bottom and request another page',
-      '  ?     show this help', '',
-      state.line_range and 'Line history omits the compact stats column.' or 'The compact stats column uses: <files>f <additions> <deletions>.',
-      'See :help guit for full documentation.',
-    }, '\n'), vim.log.levels.INFO, { title = 'guit.nvim' })
-  end, opts)
-  vim.keymap.set('n', 'gg', function() vim.cmd('normal! gg') end, opts)
-  vim.keymap.set('n', 'G', function() vim.cmd('normal! G'); fetch_more(state, true) end, opts)
+  local function with_item(fn)
+    return function(s)
+      local item = get_current_item(s)
+      if item then
+        fn(s, item)
+      end
+    end
+  end
+
+  local handlers = {
+    close = function(s)
+      session.close(s)
+    end,
+    refresh = refresh,
+    focus_target = focus_target_window,
+    open_show = open_show_from_history,
+    open = with_item(function(s, item)
+      open_primary(s, item, true)
+    end),
+    open_focus = with_item(function(s, item)
+      open_primary(s, item, false)
+    end),
+    commit = with_item(function(s, item)
+      open_commit(s, item.hash, { keep_focus = true })
+    end),
+    commit_focus = with_item(function(s, item)
+      open_commit(s, item.hash, { keep_focus = false })
+    end),
+    open_diff = with_item(function(s, item)
+      require('guit').compare(item.hash, 'HEAD', { cwd = s.cwd })
+    end),
+    -- File history has a file diff to show, and can name the shape of it.
+    open_diff_inline = state.is_file and with_item(function(s, item)
+      open_file_diff_for_history(s, item, true, 'inline')
+    end) or nil,
+    open_diff_split = state.is_file and with_item(function(s, item)
+      open_file_diff_for_history(s, item, true, 'split')
+    end) or nil,
+    yank_hash = with_item(function(_, item)
+      ui_util.yank(item.hash)
+    end),
+    cmdline = with_item(function(_, item)
+      ui_util.put_on_cmdline(item.hash)
+    end),
+  }
+
+  handlers.help = keymaps.help_handler(
+    state.line_range and 'Guit line history' or 'Guit history',
+    handlers
+  )
+  keymaps.apply(state, handlers)
 end
 
 function M.open(opts)
@@ -382,7 +375,6 @@ function M.open(opts)
   vim.bo[bufnr].buftype = 'nofile'
   vim.bo[bufnr].bufhidden = 'wipe'
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].filetype = 'guithistory'
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].readonly = true
 
@@ -429,6 +421,9 @@ function M.open(opts)
   state_by_buf[bufnr] = state
   session.register(state, snapshot)
   set_keymaps(state)
+  -- Set last: FileType fires here, so after/ftplugin/guithistory.lua runs after the
+  -- plugin's own mappings and can override them.
+  vim.bo[bufnr].filetype = 'guithistory'
   attach_autocmds(state)
   render.update_winbar(state)
   refresh(state)
@@ -443,6 +438,35 @@ function M.activate(bufnr, winid)
   session.register(state, snapshot)
   render.update_selected_line(state)
   render.update_winbar(state)
+end
+
+--- The commits shown on a range of lines, oldest last.
+---
+--- Line N of a log or history pane is item N, which is what makes
+--- `:'<,'>Guit compare` and `:'a,'bGuit compare` work: the visual selection or
+--- the marks are the selection mechanism, so Guit needs no marking mode of its
+--- own.
+---@param bufnr integer
+---@param line1 integer
+---@param line2 integer
+---@return table[] items
+---@return string|nil cwd the repository the commits belong to
+function M.items_in_range(bufnr, line1, line2)
+  local state = state_by_buf[bufnr]
+  if not state then
+    return {}, nil
+  end
+
+  local first = math.min(line1, line2)
+  local last = math.max(line1, line2)
+  local items = {}
+  for line = first, last do
+    local item = state.items[line]
+    if item then
+      items[#items + 1] = item
+    end
+  end
+  return items, state.cwd
 end
 
 return M

@@ -1,77 +1,95 @@
+local git_parse = require('guit.git_parse')
+
 local M = {}
 
-local function parse_name_status(output)
-  local items = {}
-  for _, line in ipairs(vim.split(output or '', '\n', { trimempty = true })) do
-    local status, rest = line:match('^(%S+)%s+(.+)$')
-    if status and rest then
-      local path = rest
-      local old_path = nil
-      if status:match('^R%d+$') or status:match('^C%d+$') then
-        local left, right = rest:match('^(.-)%s+(.+)$')
-        old_path = left
-        path = right or rest
-      end
-      items[#items + 1] = {
-        status = status,
-        path = path,
-        old_path = old_path,
-        kind = 'file',
-        additions = 0,
-        deletions = 0,
-      }
-    end
+--- Builds the revision arguments for a git diff.
+---
+--- Two-dot (the default) diffs the two revisions directly. Three-dot compares
+--- `right` against the merge base, which is what reviewing a branch normally
+--- means; git accepts that as a single `left...right` argument.
+---@param opts table { left, right, symmetric }
+---@return string[]
+local function range_args(opts)
+  if opts.symmetric then
+    return { opts.left .. '...' .. opts.right }
   end
-  return items
+  -- An absent right side means "against the working tree": git wants the
+  -- revision alone, not an empty second argument.
+  if not opts.right or opts.right == '' then
+    return { opts.left }
+  end
+  return { opts.left, opts.right }
 end
 
-local function parse_numstat(output)
-  local stats = {}
-  local total = { additions = 0, deletions = 0 }
-  for _, line in ipairs(vim.split(output or '', '\n', { trimempty = true })) do
-    local add_s, del_s, path = line:match('^(%S+)\t(%S+)\t(.+)$')
-    if add_s and del_s and path then
-      local additions = tonumber(add_s) or 0
-      local deletions = tonumber(del_s) or 0
-      stats[path] = { additions = additions, deletions = deletions }
-      local prefix, old_name, new_name, suffix = path:match('^(.-){(.-)%s+=>%s+(.-)}(.*)$')
-      if old_name and new_name then
-        stats[prefix .. old_name .. suffix] = stats[path]
-        stats[prefix .. new_name .. suffix] = stats[path]
-      end
-      total.additions = total.additions + additions
-      total.deletions = total.deletions + deletions
-    end
+--- The merge base of a three-dot comparison, which is the revision every
+--- file on the left side is actually read from: `left...right` lists what
+--- `right` changed since the branches diverged, so a file diff against
+--- `left` itself would show `left`'s own changes as well.
+---@param opts table { cwd, left, right }
+---@return string|nil base
+---@return string|nil err
+function M.merge_base(opts)
+  local result = vim.system({ 'git', 'merge-base', opts.left, opts.right }, { cwd = opts.cwd, text = true }):wait()
+  if result.code ~= 0 then
+    return nil, (result.stderr or result.stdout or 'git merge-base failed'):gsub('%s+$', '')
   end
-  return stats, total
+  local base = (result.stdout or ''):gsub('%s+$', '')
+  if base == '' then
+    return nil, 'no merge base between ' .. opts.left .. ' and ' .. opts.right
+  end
+  return base
+end
+
+--- Asynchronous form of |merge_base|.
+function M.fetch_merge_base(opts, on_done)
+  vim.system({ 'git', 'merge-base', opts.left, opts.right }, { cwd = opts.cwd, text = true }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        on_done(nil, (result.stderr or result.stdout or 'git merge-base failed'):gsub('%s+$', ''))
+        return
+      end
+      local base = (result.stdout or ''):gsub('%s+$', '')
+      if base == '' then
+        on_done(nil, 'no merge base between ' .. opts.left .. ' and ' .. opts.right)
+        return
+      end
+      on_done(base)
+    end)
+  end)
 end
 
 function M.fetch_changed_files(opts, on_done)
   local args = {
-    'git', '--no-pager', 'diff', '--find-renames', '--name-status', opts.left, opts.right,
+    -- -z keeps paths raw; the trailing -- stops a ref that looks like a path
+    -- (or like an option) from being reinterpreted by git.
+    'git', '--no-pager', 'diff', '--find-renames', '--name-status', '-z',
   }
+  vim.list_extend(args, range_args(opts))
+  args[#args + 1] = '--'
   vim.system(args, { cwd = opts.cwd, text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
         on_done(nil, (result.stderr or result.stdout or 'git diff --name-status failed'):gsub('%s+$', ''))
         return
       end
-      on_done(parse_name_status(result.stdout))
+      on_done(git_parse.name_status_z(result.stdout))
     end)
   end)
 end
 
 function M.fetch_numstat(opts, on_done)
   local args = {
-    'git', '--no-pager', 'diff', '--find-renames', '--numstat', opts.left, opts.right,
+    'git', '--no-pager', 'diff', '--find-renames', '--numstat', '-z',
   }
+  vim.list_extend(args, range_args(opts))
+  args[#args + 1] = '--'
   vim.system(args, { cwd = opts.cwd, text = true }, function(result)
     vim.schedule(function()
       if result.code ~= 0 then
         on_done(nil, nil, (result.stderr or result.stdout or 'git diff --numstat failed'):gsub('%s+$', ''))
         return
       end
-      local stats, total = parse_numstat(result.stdout)
+      local stats, total = git_parse.numstat_z(result.stdout)
       on_done(stats, total)
     end)
   end)
@@ -99,21 +117,27 @@ function M.fetch_meta(opts, on_done)
     end)
   end
 
-  local pending = 2
+  -- An empty right side is the working tree, which has no commit to read.
+  local worktree_right = not opts.right or opts.right == ''
+  local pending = worktree_right and 1 or 2
   local out = {}
   local failed = false
   local function done()
     pending = pending - 1
     if pending == 0 and not failed then
+      if worktree_right then
+        on_done({ left = out.left, right = { input = 'working tree' }, ahead = nil, behind = nil })
+        return
+      end
       vim.system({ 'git', 'rev-list', '--left-right', '--count', opts.left .. '...' .. opts.right }, {
         cwd = opts.cwd, text = true,
       }, function(result)
         vim.schedule(function()
-          local ahead, behind = 0, 0
+          local ahead, behind = nil, nil
           if result.code == 0 then
-            behind, ahead = (result.stdout or ''):match('^(%d+)%s+(%d+)')
-            behind = tonumber(behind) or 0
-            ahead = tonumber(ahead) or 0
+            local b, a = (result.stdout or ''):match('^(%d+)%s+(%d+)')
+            behind = tonumber(b)
+            ahead = tonumber(a)
           end
           on_done({ left = out.left, right = out.right, ahead = ahead, behind = behind })
         end)
@@ -126,11 +150,13 @@ function M.fetch_meta(opts, on_done)
     out.left = meta
     done()
   end)
-  read_rev(opts.right, function(meta, err)
-    if err and not failed then failed = true; on_done(nil, err); return end
-    out.right = meta
-    done()
-  end)
+  if not worktree_right then
+    read_rev(opts.right, function(meta, err)
+      if err and not failed then failed = true; on_done(nil, err); return end
+      out.right = meta
+      done()
+    end)
+  end
 end
 
 function M.enrich_with_numstat(items, stats)

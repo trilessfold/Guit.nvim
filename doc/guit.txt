@@ -15,8 +15,8 @@ COMMANDS                                                *guit-commands*
 
 :Guit show <rev>                                         *:Guit-show*
     Open changed files for a commit in a bottom split.
-    Press <CR> on a file to open the file at that commit and run
-    :Gdiffsplit against the parent commit in Fugitive.
+    Press <CR> on a file to open its diff against the parent commit, side
+    by side in Fugitive or inline depending on `diff.mode`.
 
 :Guit show %                                             *:Guit-show-percent*
     From a Fugitive object buffer, open changed files for that object's commit.
@@ -40,24 +40,56 @@ COMMANDS                                                *guit-commands*
     is scroll-bound and cursor-bound to the target file window. While open, it
     follows the focused normal file or Fugitive file object buffer.
 
-:Guit compare <left_rev> <right_rev>                     *:Guit-compare*
+:Guit compare {left} {right}                             *:Guit-compare*
+:Guit compare {left}..{right}
+:Guit compare {left}...{right}
+:Guit compare {rev}
+:[range]Guit compare
     Compare two revisions (branches, tags, or commit hashes) in a bottom split.
-    Accepts either two arguments or a single range like left..right.
+
+    Two dots compare the revisions directly. Three dots compare {right}
+    against the merge base, which is what reviewing a branch usually means;
+    file diffs opened from that list use the merge base as their old side
+    too. A single revision compares it against the working tree.
+
+    With a [range] in a |guit-log| or |guit-history| pane, the selected lines
+    choose the commits. The range is inclusive: every selected commit appears
+    in the diff, unlike git's own {left}..{right}, which excludes {left}.
+    Selecting the root commit compares against the empty tree.
+
+    This is how Guit selects commits, and it needs no marking mode of its own,
+    because Vim already has two: >
+        V j j :Guit compare
+        ma ... mb ... :'a,'bGuit compare
+        :.,'aGuit compare
+        :5,12Guit compare
+<
     Command-line completion suggests local branches, remote branches, tags,
     and HEAD.
-    Press <CR> on a file to open the right revision and diff it against the left
-    revision in Fugitive.
+    Press <CR> on a file to open the right revision and diff it against the
+    left revision, side by side in Fugitive or inline depending on
+    `diff.mode`.
+
+:Guit inline [rev]                                       *:Guit-inline*
+    Draw the diff of the current buffer against [rev] over the buffer itself,
+    see |guit-inline-diff|. Without [rev] a working tree file is compared
+    against the index (what `git diff` shows) and a Fugitive object against
+    its parent (what that commit did to the file). Running the command again
+    without [rev] removes the overlay.
+
+    Command-line completion suggests local branches, remote branches, tags,
+    and HEAD.
 
 :Guit status                                             *:Guit-status*
-    Open a read-only working tree changes browser in a bottom split. Files are
-    grouped under Staged, Unstaged, Untracked, and Conflicts sections. Opening
-    entries opens working tree files. Press dd to open the Fugitive diff for
-    the selected file. This command does not stage, unstage, restore, or
-    otherwise modify files.
+    Open a working tree browser in a bottom split. Files are grouped under
+    Staged, Unstaged, Untracked, and Conflicts sections. Opening entries opens
+    working tree files. Press dd to open the diff for the selected file:
+    staged files against HEAD, unstaged files against the index. See
+    |guit-status| for staging.
 
 Command-line completion:
-    |:Guit-log|, |:Guit-show|, and |:Guit-compare| complete local branches,
-    remote branches, tags, and HEAD. |:Guit-show| and |:Guit-history| complete
+    |:Guit-log|, |:Guit-show|, |:Guit-compare| and |:Guit-inline| complete
+    local branches, remote branches, tags, and HEAD. |:Guit-show| and |:Guit-history| complete
     % where supported.
 
 ===============================================================================
@@ -69,14 +101,24 @@ Keys:
     <CR>    Open the selected commit in the target window and keep focus
             in the log pane.
     o       Open the selected commit and move focus to the target window.
+    c       Same as <CR>. It exists so that the key which opens a commit is
+            the same in every pane.
+    C       Same as o.
+    dd      Compare the selected commit against HEAD.
     s       Open |:Guit-show| for the selected commit in the same lower pane.
             Returning from show restores the same log buffer and cursor line.
+    y CTRL-G
+            Yank the full hash into a register, honouring "x prefixes.
+    .       Put the hash on the command line, cursor before it, ready for
+            :Guit compare, :Git revert, :Git cherry-pick or :Gdiffsplit.
     <Tab>   Jump to the target window.
     r       Refresh the log.
-    q       Close the pane.
-    gg      Jump to the top.
-    G       Jump to the bottom and request another page.
-    ?       Show a short in-editor help message.
+    q       Close this pane.
+    g?      Show the mappings that are actually in effect.
+
+Guit does not map ?, gg, G, H, L or CTRL-O in the log, so search, motions and
+the jumplist behave normally. More commits load as the cursor approaches the
+end of the list.
 
 ===============================================================================
 SHOW BUFFER                                             *guit-show*
@@ -94,31 +136,31 @@ The show buffer can render files in two modes:
     list
 
 Keys:
-    <CR>    On a file: open the Fugitive diff in the target window.
-            On a directory in tree mode: toggle the directory.
-    o       Open the selected file and move focus to the target window.
-    <Tab>   Jump to the target window.
-    -       Return to the originating |guit-log| or |guit-history| buffer when
-            available.
-            If this show view was restored by |:Guit-toggle|, the originating
-            log or history view is restored from its saved context.
-    <BS>    Same as -.
-    t       Toggle between tree and list views.
-    h       Collapse the current directory. If it is already collapsed,
-            collapse its parent. On a file, collapse the parent.
-    l       Expand the current directory. If it is already expanded,
-            jump to its first child. On a file, expand its parent chain.
-    H       Collapse the current subtree.
-    L       Expand the current subtree.
+    <CR>    Open the file diff. On a directory in tree view this folds or
+            unfolds it instead.
+    o       Same, but move focus to the target window.
+    dd      Open the diff for the file under the cursor. dd means diff in
+            every pane; its shape follows the `diff.mode` setting.
+    di      Open the diff inline, in a single buffer (|guit-inline-diff|).
+    ds      Open the diff side by side in Fugitive.
+    c C     Open this commit in Fugitive, keeping or moving focus.
+    -       Return to the log or history pane this view was opened from.
+    t       Switch between tree and list view.
+    h l     Collapse or expand the directory under the cursor. In list view
+            they fall back to the normal motions.
+    H L     Collapse or expand the whole subtree.
+    zC zO   Same as H and L, for fold muscle memory.
+    zM zR   Collapse or expand the whole tree.
     [z      Jump to the parent directory.
-    zP      Jump to the top-level ancestor of the current branch.
-    zj      Jump to the next sibling entry.
-    zk      Jump to the previous sibling entry.
-    zM      Collapse all directories.
-    zR      Expand all directories.
-    r       Refresh the changed-files view.
-    q       Close the pane.
-    ?       Show a short in-editor help message.
+    zP      Jump to the top-level directory of the current branch.
+    zj zk   Jump to the next or previous sibling.
+    y CTRL-G
+            Yank <commit>:<path> into a register.
+    .       Put that object on the command line.
+    <Tab>   Jump to the target window.
+    r       Reload this view.
+    q       Close this pane.
+    g?      Show the mappings that are actually in effect.
 
 When a renamed file is opened from |guit-show|, Guit opens the file at the
 selected commit and diffs it against the old path in the parent commit.
@@ -135,29 +177,34 @@ The top of the buffer shows comparison metadata:
     combined line-change totals
 
 Keys:
-    <CR>    On a file: open the right revision and diff it against the left
-            revision in the target window.
-            On a directory in tree mode: toggle the directory.
-    o       Open the selected file diff and move focus to the target window.
+    <CR>    Open the file diff between the compared revisions. On a directory
+            in tree view this folds or unfolds it instead.
+    o       Same, but move focus to the target window.
+    dd      Open the diff for the file under the cursor. dd means diff in
+            every pane; its shape follows the `diff.mode` setting.
+    di      Open the diff inline, in a single buffer (|guit-inline-diff|).
+    ds      Open the diff side by side in Fugitive.
+    t       Switch between tree and list view.
+    h l     Collapse or expand the directory under the cursor. In list view
+            they fall back to the normal motions.
+    H L     Collapse or expand the whole subtree.
+    zC zO   Same as H and L, for fold muscle memory.
+    zM zR   Collapse or expand the whole tree.
+    [z      Jump to the parent directory.
+    zP      Jump to the top-level directory of the current branch.
+    zj zk   Jump to the next or previous sibling.
+    y CTRL-G
+            Yank <right>:<path> into a register.
+    .       Put that object on the command line.
     <Tab>   Jump to the target window.
-    t       Toggle between tree and list views.
-    h       Collapse the current directory. If it is already collapsed,
-            collapse its parent. On a file, collapse the parent.
-    l       Expand the current directory. If it is already expanded,
-            jump to its first child. On a file, expand its parent chain.
-    H       Collapse the current subtree.
-    L       Expand the current subtree.
-    zM      Collapse all directories.
-    zR      Expand all directories.
-    r       Refresh the compare view.
-    q       Close the pane.
-    ?       Show a short in-editor help message.
+    r       Reload this view.
+    q       Close this pane.
+    g?      Show the mappings that are actually in effect.
 
 ===============================================================================
 STATUS BUFFER                                           *guit-status*
 
-The status buffer is read-only and shows current working tree changes grouped
-by Git state:
+The status buffer shows current working tree changes grouped by Git state:
     Staged
     Unstaged
     Untracked
@@ -166,28 +213,74 @@ by Git state:
 It reuses the tree/list navigation from |guit-show| and |guit-compare|.
 
 Keys:
-    <CR>    On a file: open the working tree file in the target window.
-            On a directory in tree mode: toggle the directory.
-    o       Open the selected file and move focus to the target window.
-    dd      Open the selected file diff and keep focus in status.
-    <Tab>   Jump to the target window.
+    <CR>    Open the working tree file. On a directory in tree view this folds
+            or unfolds it instead.
+    o       Same, but move focus to the target window.
+    dd      Open the diff for the file under the cursor. dd means diff in
+            every pane; its shape follows the `diff.mode` setting.
+    di      Open the diff inline, in a single buffer (|guit-inline-diff|).
+    ds      Open the diff side by side in Fugitive.
+    t       Switch between tree and list view.
+    h l     Collapse or expand the directory under the cursor. In list view
+            they fall back to the normal motions.
+    H L     Collapse or expand the whole subtree.
+    zC zO   Same as H and L, for fold muscle memory.
+    zM zR   Collapse or expand the whole tree.
     [z      Jump to the parent directory.
-    zP      Jump to the top-level directory for the current branch.
-    zj/zJ   Jump to the next sibling entry.
-    zk/zK   Jump to the previous sibling entry.
-    t       Toggle between tree and list views.
-    h       Collapse the current directory.
-    l       Expand the current directory.
-    H       Collapse the current subtree.
-    L       Expand the current subtree.
-    zM      Collapse all directories.
-    zR      Expand all directories.
-    r       Refresh status.
-    q       Close status.
-    ?       Show a short in-editor help message.
+    zP      Jump to the top-level directory of the current branch.
+    zj zk   Jump to the next or previous sibling.
+    y CTRL-G
+            Yank the worktree path into a register.
+    .       Put that object on the command line.
+    <Tab>   Jump to the target window.
+    r       Reload this view.
+    q       Close this pane.
+    g?      Show the mappings that are actually in effect.
 
-|:Guit-status| is intentionally read-only. It does not stage, unstage, restore,
-or otherwise modify files.
+                                                        *guit-staging*
+Staging keys follow fugitive, so fingers carry over from :Git. They are the one
+deliberate exception to "a key means the same thing in every pane": s and -
+read differently here, and only here, where their usual meanings have nothing
+to act on.
+
+    s       Stage the file, directory or selection.
+    u       Unstage it.
+    -       Stage it if unstaged, unstage it if staged.
+    X       Throw the changes away. Asks first, listing exactly what will be
+            lost.
+
+Each key acts on three kinds of target:
+    a file            just that file
+    a directory or a
+    section heading   every file beneath it
+    a visual selection
+                      every file the selected lines cover
+
+X is the only destructive action here, and what it destroys depends on where
+the file sits:
+    Staged            reset to HEAD, in the index and in the worktree. For a
+                      newly added file that removes it from disk, because HEAD
+                      has no version to restore. A staged rename is reset on
+                      both of its paths, so the old file comes back and the
+                      new one goes.
+    Unstaged          the change is lost.
+    Conflicts         reset the same way, index and worktree, to HEAD.
+    Untracked         the file is deleted from disk. git has no copy of it.
+
+Likewise u on a staged rename resets both paths, leaving the old file as an
+unstaged deletion and the new one untracked, the way `git reset` would.
+
+Paths are always passed to git literally: a file named `*.txt` acts on itself
+alone, never on the other .txt files.
+
+Guit runs these one after another rather than in parallel, because concurrent
+writes collide on .git/index.lock and one of them quietly does nothing. A key
+pressed while a previous action is still running is refused with a message
+rather than queued.
+
+Guit does not commit, push, rebase, or stage individual hunks. Use fugitive for
+those: |:Guit-status| puts the path on the command line with `.`, and yanks it
+with y CTRL-G.
 
 ===============================================================================
 HISTORY BUFFER                                          *guit-history*
@@ -195,23 +288,21 @@ HISTORY BUFFER                                          *guit-history*
 The history buffer is read-only.
 
 Keys:
-
-    <CR>    For file history: open the file diff for the selected commit and
-            keep focus in history. For directory history: open the selected
-            commit in the target window. For line history: open the file
-            revision for the selected commit.
-    o       Open the file diff, file revision, or commit and move focus to the
-            target window.
-    c       Open the selected commit in Fugitive and keep focus in history.
-    C       Open the selected commit in Fugitive and move focus to target.
+    <CR>    Open what this history is about: the file diff for a file history,
+            the file revision for a line history, the commit otherwise.
+    o       Same, but move focus to the target window.
+    c C     Open the selected commit in Fugitive, keeping or moving focus.
+    dd      Compare the selected commit against HEAD.
     s       Open |:Guit-show| for the selected commit in the same lower pane.
-            Returning from show restores the same history buffer and cursor.
+    y CTRL-G
+            Yank the full hash into a register.
+    .       Put the hash on the command line.
     <Tab>   Jump to the target window.
-    r       Refresh history.
-    q       Close history.
-    gg      Jump to the top.
-    G       Jump to the bottom and request another page.
-    ?       Show a short in-editor help message.
+    r       Reload this view.
+    q       Close this pane.
+    g?      Show the mappings that are actually in effect.
+
+A [range] here selects commits for |:Guit-compare|, the same as in |guit-log|.
 
 The compact stats column uses:
     {files}f {additions} {deletions}
@@ -224,6 +315,113 @@ History rows include a file-action prefix when available:
 
 For renamed files, file diffs use the old path on the parent side and the new
 path on the selected commit side.
+
+===============================================================================
+INLINE DIFF                                             *guit-inline-diff*
+
+A file diff can be shown in two shapes. The split shape is Fugitive's
+side-by-side |vimdiff| of two buffers. The inline shape is a single buffer
+with the changes drawn on top of it, the way VS Code's inline diff view
+draws them:
+
+    the buffer is the new side: a Fugitive object, or the working tree file
+    itself, with its own 'filetype', treesitter and whatever else is attached
+    to it -- gitsigns, LSP, |:Guit-blame| following it;
+    everything the new side has is green: added and changed lines alike get
+    the DiffAdd background, and within a changed line the characters that
+    differ a stronger green;
+    lines the old side had are drawn as virtual lines where they used to be,
+    red, with the characters that differ a stronger red and the code in the
+    syntax colours it had;
+    the sign column marks each hunk: + an added line, ~ a changed one, _ a
+    line after which something was removed, ‾ the first line when the
+    removal was at the top, and ~_ a changed line with a removal after it.
+    A removed line that was blank shows as an empty red line, which is
+    what it was.
+
+The old side is never loaded into a buffer. A working tree file keeps being
+editable; the overlay follows the edits.
+
+Lines are grouped into hunks the same way |:diffthis| and Gdiffsplit do:
+'diffopt' settings that vim.diff() understands -- algorithm:, indent-heuristic,
+linematch:, iwhite, iwhiteall, iwhiteeol, iblank -- apply here too, so the
+inline diff does not disagree with the split shape on where a change starts
+and ends.
+
+Lines removed above the first line are virtual lines Vim only shows once the
+window is scrolled up past line 1, the same as 'diff' filler lines: scroll up
+to see them.
+
+dd in the |guit-show|, |guit-compare|, |guit-status| and file |guit-history|
+panes opens whichever shape `diff.mode` selects; di and ds pick one
+explicitly. |:Guit-inline| draws the overlay on any buffer without a pane.
+
+The two shapes never show a buffer at the same time, however they were
+opened. The overlay going on a buffer that is in a side-by-side diff -- di
+after ds, or |:Guit-inline| and di in fugitive's buffers after fugitive's
+own dd or ds -- closes the windows it was diffed against and turns 'diff'
+off; a side that cannot be closed (the last window, unsaved changes with
+'nohidden') just stops diffing. A buffer entering a side-by-side diff -- ds
+after di, fugitive's dd, a plain |:diffthis| -- loses its overlay.
+
+Keys, mapped into the diffed buffer while the overlay is shown:
+    ]c      Jump to the next hunk. A count jumps that many.
+    [c      Jump to the previous hunk.
+
+Like Vim's own ]c and [c in 'diff' mode, these do not wrap. This is the one
+place Guit maps into a buffer it does not own: a buffer-local mapping that
+was already there (gitsigns' ]c, say) is saved and put back when the overlay
+goes. Set `hunk_next` or `hunk_prev` to false in |guit-config| to leave the
+keys alone.
+
+While an overlay is shown, `b:guit_inline_diff` holds the object the buffer
+is compared against, for a statusline.
+
+                                                        *guit-fugitive*
+di also works inside fugitive's own buffers, next to fugitive's dd, ds and dv:
+
+    In the |:Git| status buffer, di opens the file under the cursor as an
+    inline diff -- staged files against HEAD, unstaged files against the
+    index, untracked and conflicted files simply opened -- in the window you
+    came from, or a split above the status when there is none. Like
+    fugitive's dd it moves focus to the file. On an expanded hunk it acts on
+    the file the hunk belongs to.
+
+    In a fugitive blob buffer (`fugitive://.../<commit>/<path>`), di is
+    |:Guit-inline|: the file against its parent commit. Pressing it again
+    removes the overlay.
+
+The key is the `fugitive_inline` action; set it to false to leave fugitive's
+buffers alone.
+
+Configuration: >lua
+  require('guit').setup({
+    diff = {
+      mode = 'inline',    -- split | inline: what dd opens
+      signs = true,       -- +, ~, _ and ‾ in the sign column
+      word_diff = true,   -- highlight what differs within a changed line
+      syntax = true,      -- removed lines in the old side's syntax colours
+    },
+  })
+<
+`word_diff` highlights, within a changed line, the words that differ:
+GuitDiffAddText on the new line, GuitDiffDeleteText on the removed one above
+it. A replaced word is narrowed to the characters that differ, as 'diffopt'
+inline:char does. Set it to false for line highlights only.
+
+`syntax` colours removed lines with treesitter, using the parser of the
+buffer's 'filetype' on the whole old side, so a line inside a string or a
+comment is coloured as one. Without a parser for the filetype, or with the
+option off, removed lines are drawn in the normal text colour.
+
+Highlight groups: GuitDiffAdd and GuitDiffDelete take the background of the
+colorscheme's DiffAdd and DiffDelete -- green and red when it sets none, the
+foreground toned down when it uses 'reverse' -- and nothing else: they are
+laid over real code, whose own colours must show through, and many schemes
+give DiffDelete a foreground meant for vimdiff's filler lines, unreadable for
+real text. GuitDiffAddText and GuitDiffDeleteText are the stronger shades for
+the characters that differ. GuitDiffSignAdd, GuitDiffSignChange and
+GuitDiffSignDelete colour the signs.
 
 ===============================================================================
 BLAME BUFFER                                            *guit-blame*
@@ -253,15 +451,20 @@ near the top or bottom edge. This keeps the active blame line visible without
 changing folds or scroll state in the target window.
 
 Keys:
-    <CR>    Open the file at the blamed revision in the target window without
-            closing the blame pane.
-    <C-o>   Restore the previous target buffer opened before blame <CR>.
-    c       Open the blamed commit in Fugitive and keep focus in blame.
-    C       Open the blamed commit in Fugitive and move focus to target.
+    <CR>    Open the file at the blamed revision in the target window.
+    o       Same, but move focus to the target window.
+    c C     Open the blamed commit in Fugitive, keeping or moving focus.
     s       Open |:Guit-show| for the blamed commit.
-    t       Cycle blame mode.
+    -       Restore the buffer the target window showed before blame opened
+            one. This used to be CTRL-O, which shadowed the jumplist.
+    t       Cycle the blame mode: color, plain, heat.
+    y CTRL-G
+            Yank the blamed commit's full hash into a register.
+    .       Put that hash on the command line.
+    <Tab>   Jump to the target window.
+    r       Reload the blame.
     q       Close the blame pane.
-    ?       Show a short in-editor help message.
+    g?      Show the mappings that are actually in effect.
 
 Blame modes preserve the normal window background and color the hash plus block
 marker:
@@ -310,18 +513,57 @@ CONFIGURATION                                           *guit-config*
       mode = 'color',
       width = 60,
     },
+    diff = {
+      mode = 'split', -- split | inline, see |guit-inline-diff|
+      signs = true,
+      word_diff = true,
+    },
     keymaps = {
-      open_show = 's',
-      back = '-',
-      toggle_view = 't',
-      collapse = 'h',
-      expand = 'l',
-      collapse_all = 'H',
-      expand_all = 'L',
-      help = '?',
+      -- Opening
+      open = '<CR>', open_focus = 'o', open_diff = 'dd',
+      open_diff_inline = 'di', open_diff_split = 'ds',
+      open_show = 's', commit = 'c', commit_focus = 'C',
+      -- Moving
+      focus_target = '<Tab>', back = '-',
+      -- Pane
+      refresh = 'r', close = 'q', help = 'g?', toggle_view = 't',
+      -- Tree
+      collapse = 'h', expand = 'l',
+      collapse_subtree = 'H', expand_subtree = 'L',
+      collapse_tree = 'zM', expand_tree = 'zR',
+      jump_parent = '[z', jump_top = 'zP',
+      jump_next = 'zj', jump_prev = 'zk',
+      -- Taking the object elsewhere
+      yank_hash = 'y<C-G>', cmdline = '.',
+      -- |:Guit-status| only
+      stage = 's', unstage = 'u', stage_toggle = '-', discard = 'X',
+      -- inside a buffer showing an inline diff, see |guit-inline-diff|
+      hunk_next = ']c', hunk_prev = '[c',
+      -- inside fugitive's :Git status and blob buffers, see |guit-fugitive|
+      fugitive_inline = 'di',
     },
   })
 <
+                                                        *guit-keymaps*
+Set any action to false to leave that key to Vim: >lua
+  require('guit').setup({ keymaps = { open_diff = false } })
+<
+Mappings carry a `desc`, so :map and which-key describe them, and g? lists the
+keys that are actually in effect rather than the defaults.
+
+Guit sets 'filetype' after installing its mappings, so an after/ftplugin file
+overrides them: >lua
+  -- after/ftplugin/guitlog.lua
+  vim.keymap.set('n', '<CR>', '<Cmd>echo "mine"<CR>', { buffer = 0 })
+<
+These configuration names were renamed and still work for one release:
+    split           ->  open_focus
+    collapse_all    ->  collapse_subtree
+    expand_all      ->  expand_subtree
+
+Guit no longer maps ?, gg, G or CTRL-O anywhere, and never maps CTRL-O into
+your own file buffers. The only mappings it puts into a file buffer are ]c and
+[c while an inline diff is drawn on it, see |guit-inline-diff|.
 
 *guit-show_counts*
     Boolean. Show per-file and per-directory change counts in |:Guit-show|,

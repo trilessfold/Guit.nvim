@@ -6,6 +6,7 @@ local show_buffer = require('guit.ui.show_buffer')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
+local keymaps = require('guit.keymaps')
 local session = require('guit.session')
 
 local M = {}
@@ -76,6 +77,9 @@ local function restore_cursor(state)
 end
 
 local function should_prefetch(state)
+  if state.fetch_failed then
+    return false
+  end
   local line = current_line(state)
   if not line then
     return false
@@ -93,57 +97,22 @@ local function focus_target_window(state)
   end
 end
 
-local function bind_back_navigation(state, bufnr)
-  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then
-    return
-  end
-
-  if vim.b[bufnr].guit_log_bufnr == state.bufnr then
-    return
-  end
-
-  vim.b[bufnr].guit_log_bufnr = state.bufnr
-  vim.keymap.set('n', '<C-o>', function()
-    if state.winid and vim.api.nvim_win_is_valid(state.winid) then
-      vim.api.nvim_set_current_win(state.winid)
-    elseif state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
-      vim.cmd('buffer ' .. state.bufnr)
-    end
-  end, {
-    buffer = bufnr,
-    silent = true,
-    nowait = true,
-    desc = 'Return to Guit log',
-  })
-end
 
 local function open_commit(state, commit, opts)
   opts = opts or {}
 
-  if vim.fn.exists(':Gedit') == 2 then
-    local ok, err = preview.with_managed_preview(state, function()
-      vim.cmd(('Gedit %s'):format(commit))
-    end)
-    if not ok then
-      vim.notify('guit.nvim: failed to open commit in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
-      if opts.keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-        vim.api.nvim_set_current_win(state.winid)
-      end
-      return
-    end
-    bind_back_navigation(state, vim.api.nvim_get_current_buf())
-  else
-    vim.notify('guit.nvim: fugitive not found (:Gedit unavailable)', vim.log.levels.WARN)
-    local ok, err = preview.with_managed_preview(state, function()
-      vim.cmd(('edit %s'):format(vim.fn.fnameescape(commit .. '.gitshow')))
-    end)
-    if not ok then
-      vim.notify('guit.nvim: failed to open commit preview: ' .. tostring(err), vim.log.levels.ERROR)
-      if opts.keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
-        vim.api.nvim_set_current_win(state.winid)
-      end
-      return
-    end
+  -- fugitive is a hard requirement; the old ".gitshow" fallback buffer was a
+  -- dead branch that only produced an empty, meaningless file.
+  if vim.fn.exists(':Gedit') ~= 2 then
+    vim.notify('guit.nvim: fugitive not found (:Gedit unavailable)', vim.log.levels.ERROR)
+    return
+  end
+
+  local ok, err = preview.with_managed_preview(state, function()
+    vim.cmd(('Gedit %s'):format(commit))
+  end)
+  if not ok then
+    vim.notify('guit.nvim: failed to open commit in fugitive: ' .. tostring(err), vim.log.levels.ERROR)
   end
 
   if opts.keep_focus and state.winid and vim.api.nvim_win_is_valid(state.winid) then
@@ -175,6 +144,7 @@ local function fetch_more(state, force)
   end
 
   state.loading = true
+  local generation = state.generation or 0
   render.set_loading_line(state, '… loading git log …')
   render.update_winbar(state)
 
@@ -187,11 +157,17 @@ local function fetch_more(state, force)
     if not vim.api.nvim_buf_is_valid(state.bufnr) then
       return
     end
+    -- A refresh happened while this page was in flight; its results belong to
+    -- a list that no longer exists.
+    if generation ~= (state.generation or 0) then
+      return
+    end
 
     state.loading = false
     render.clear_loading_line(state)
 
     if err then
+      state.fetch_failed = true
       render.update_winbar(state)
       vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
       return
@@ -214,9 +190,11 @@ local function fetch_more(state, force)
 end
 
 local function refresh(state)
+  state.generation = (state.generation or 0) + 1
   state.items = {}
   state.eof = false
   state.loading = false
+  state.fetch_failed = false
   state.loading_row = nil
   ui_util.with_modifiable(state.bufnr, function()
     vim.api.nvim_buf_set_lines(state.bufnr, 0, -1, false, {})
@@ -284,63 +262,49 @@ local function open_show_from_log(state)
 end
 
 local function set_keymaps(state)
-  local opts = { buffer = state.bufnr, nowait = true, silent = true }
-  vim.keymap.set('n', config.options.keymaps.close, function()
-    session.close_active()
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.refresh, function()
-    refresh(state)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.open, function()
-    local item = get_current_item(state)
-    if item then
-      open_commit(state, item.hash, { keep_focus = true })
+  local function with_item(fn)
+    return function(s)
+      local item = get_current_item(s)
+      if item then
+        fn(s, item)
+      end
     end
-  end, opts)
+  end
 
-  vim.keymap.set('n', config.options.keymaps.split, function()
-    local item = get_current_item(state)
-    if item then
-      open_commit(state, item.hash, { keep_focus = false })
-    end
-  end, opts)
+  local handlers = {
+    close = function(s)
+      session.close(s)
+    end,
+    refresh = refresh,
+    focus_target = focus_target_window,
+    open_show = open_show_from_log,
+    -- In the log the row is a commit, so <CR> and c mean the same thing; c
+    -- exists so the key that opens a commit is the same in every pane.
+    open = with_item(function(s, item)
+      open_commit(s, item.hash, { keep_focus = true })
+    end),
+    open_focus = with_item(function(s, item)
+      open_commit(s, item.hash, { keep_focus = false })
+    end),
+    commit = with_item(function(s, item)
+      open_commit(s, item.hash, { keep_focus = true })
+    end),
+    commit_focus = with_item(function(s, item)
+      open_commit(s, item.hash, { keep_focus = false })
+    end),
+    open_diff = with_item(function(s, item)
+      require('guit').compare(item.hash, 'HEAD', { cwd = s.cwd })
+    end),
+    yank_hash = with_item(function(_, item)
+      ui_util.yank(item.hash)
+    end),
+    cmdline = with_item(function(_, item)
+      ui_util.put_on_cmdline(item.hash)
+    end),
+  }
 
-  vim.keymap.set('n', config.options.keymaps.open_show, function()
-    open_show_from_log(state)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.focus_target, function()
-    focus_target_window(state)
-  end, opts)
-
-  vim.keymap.set('n', config.options.keymaps.help, function()
-    vim.notify(table.concat({
-      'Guit log help',
-      '',
-      '  <CR>  open commit in target window and keep focus here',
-      '  o     open commit and move focus to target window',
-      '  s     open Guit show for the current commit in the lower pane',
-      '  <Tab> jump to target window',
-      '  r     refresh log',
-      '  q     close pane',
-      '  gg    jump to top',
-      '  G     jump to bottom and request another page',
-      '  ?     show this help',
-      '',
-      'See :help guit for full documentation.',
-    }, '\n'), vim.log.levels.INFO, { title = 'guit.nvim' })
-  end, opts)
-
-  vim.keymap.set('n', 'gg', function()
-    vim.cmd('normal! gg')
-  end, opts)
-
-  vim.keymap.set('n', 'G', function()
-    vim.cmd('normal! G')
-    fetch_more(state, true)
-  end, opts)
+  handlers.help = keymaps.help_handler('Guit log', handlers)
+  keymaps.apply(state, handlers)
 end
 
 function M.open(opts)
@@ -350,7 +314,6 @@ function M.open(opts)
   vim.bo[bufnr].buftype = 'nofile'
   vim.bo[bufnr].bufhidden = 'wipe'
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].filetype = 'guitlog'
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].readonly = true
 
@@ -392,6 +355,9 @@ function M.open(opts)
   session.register(state, snapshot)
   attach_autocmds(state)
   set_keymaps(state)
+  -- Set last: FileType fires here, so after/ftplugin/guitlog.lua runs after the
+  -- plugin's own mappings and can override them.
+  vim.bo[bufnr].filetype = 'guitlog'
   render.update_winbar(state)
   refresh(state)
 end
@@ -405,6 +371,35 @@ function M.activate(bufnr, winid)
   session.register(state, snapshot)
   render.update_selected_line(state)
   render.update_winbar(state)
+end
+
+--- The commits shown on a range of lines, oldest last.
+---
+--- Line N of a log or history pane is item N, which is what makes
+--- `:'<,'>Guit compare` and `:'a,'bGuit compare` work: the visual selection or
+--- the marks are the selection mechanism, so Guit needs no marking mode of its
+--- own.
+---@param bufnr integer
+---@param line1 integer
+---@param line2 integer
+---@return table[] items
+---@return string|nil cwd the repository the commits belong to
+function M.items_in_range(bufnr, line1, line2)
+  local state = state_by_buf[bufnr]
+  if not state then
+    return {}, nil
+  end
+
+  local first = math.min(line1, line2)
+  local last = math.max(line1, line2)
+  local items = {}
+  for line = first, last do
+    local item = state.items[line]
+    if item then
+      items[#items + 1] = item
+    end
+  end
+  return items, state.cwd
 end
 
 return M

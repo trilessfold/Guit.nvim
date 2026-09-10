@@ -1,4 +1,5 @@
 local config = require('guit.config')
+local git_parse = require('guit.git_parse')
 
 local M = {}
 
@@ -19,6 +20,7 @@ local function parse_log_items(output)
           date = meta[4],
           refs = meta[5],
           subject = meta[6],
+          parents = vim.split(meta[7] or '', '%s+', { trimempty = true }),
           files_changed = 0,
           additions = 0,
           deletions = 0,
@@ -114,7 +116,7 @@ local function parse_path_changes(output, path)
       local status, rest = line:match('^(%S+)%s+(.+)$')
       if status and rest then
         if status:match('^R%d+$') or status:match('^C%d+$') then
-          local old_path, new_path = rest:match('^(.-)%s+(.+)$')
+          local old_path, new_path = git_parse.rename_paths(rest)
           if old_path and new_path and (new_path == path or old_path == path) then
             changes[current_hash] = { status = status, path = new_path, old_path = old_path }
           end
@@ -143,7 +145,7 @@ local function parse_all_path_changes(output)
       local status, rest = line:match('^(%S+)%s+(.+)$')
       if status and rest then
         if status:match('^R%d+$') or status:match('^C%d+$') then
-          local old_path, new_path = rest:match('^(.-)%s+(.+)$')
+          local old_path, new_path = git_parse.rename_paths(rest)
           if old_path and new_path then
             changes[current_hash][#changes[current_hash] + 1] = { status = status, path = new_path, old_path = old_path }
           end
@@ -165,6 +167,7 @@ local function fetch_commit_stats(cwd, path, hashes, on_done)
 
   local args = {
     'git',
+    '-c', 'core.quotePath=false',
     '--no-pager',
     'show',
     '--numstat',
@@ -193,6 +196,7 @@ local function fetch_commit_path_changes(cwd, path, hashes, on_done)
 
   local args = {
     'git',
+    '-c', 'core.quotePath=false',
     '--no-pager',
     'show',
     '--name-status',
@@ -221,6 +225,7 @@ local function fetch_all_commit_path_changes(cwd, hashes, on_done)
 
   local args = {
     'git',
+    '-c', 'core.quotePath=false',
     '--no-pager',
     'show',
     '--name-status',
@@ -288,6 +293,36 @@ local function status_records(output)
   return records
 end
 
+--- Asynchronous form of |is_replaced_path|.
+---
+--- `git status` refreshes the index and stats the worktree, so on a large
+--- repository it costs hundreds of milliseconds. It must never run on a
+--- window-switch path.
+function M.is_replaced_path_async(cwd, path, on_done)
+  if not cwd or not path or path == '' then
+    on_done(false)
+    return
+  end
+
+  vim.system({ 'git', 'status', '--porcelain=v1', '-z', '--', path }, { cwd = cwd, text = true }, function(result)
+    vim.schedule(function()
+      if result.code ~= 0 then
+        on_done(false)
+        return
+      end
+
+      local deleted, untracked = false, false
+      for _, record in ipairs(status_records(result.stdout)) do
+        if record.path == path then
+          deleted = deleted or record.xy:sub(1, 1) == 'D' or record.xy:sub(2, 2) == 'D'
+          untracked = untracked or record.xy == '??'
+        end
+      end
+      on_done(deleted and untracked)
+    end)
+  end)
+end
+
 function M.is_replaced_path(cwd, path)
   if not cwd or not path or path == '' then
     return false
@@ -334,9 +369,11 @@ function M.fetch_total_count(opts, on_done)
 end
 
 function M.fetch_page(opts, on_done)
-  local pretty = REC .. table.concat({ '%H', '%h', '%an', '%ad', '%D', '%s' }, '%x1f')
+  -- %P (parent hashes) tells the UI whether <hash>^ resolves; it is empty
+  -- for a root commit.
+  local pretty = REC .. table.concat({ '%H', '%h', '%an', '%ad', '%D', '%s', '%P' }, '%x1f')
   local args = {
-    'git', '--no-pager', 'log',
+    'git', '-c', 'core.quotePath=false', '--no-pager', 'log',
     '--date=format-local:' .. config.options.date_format,
     '--decorate=short',
     '--color=never',

@@ -166,7 +166,7 @@ function M.update_winbar(state)
   if state.line_range then
     path = string.format('%s:%d,%d', path, state.line_range.start, state.line_range.finish)
   end
-  local rev = state.rev and (' @ ' .. state.rev:sub(1, 12) .. ' ') or ''
+  local rev = state.rev and (' @ ' .. ui_util.escape_statusline(state.rev:sub(1, 12)) .. ' ') or ''
   local title = state.line_range and ' Guit line history ' or ' Guit history '
 
   vim.wo[state.winid].winbar = table.concat({
@@ -174,7 +174,7 @@ function M.update_winbar(state)
     title,
     '%*',
     '%#' .. config.options.highlights.file .. '#',
-    ' ' .. path .. ' ',
+    ' ' .. ui_util.escape_statusline(path) .. ' ',
     '%*',
     rev,
     '%=',

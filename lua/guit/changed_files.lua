@@ -1,3 +1,5 @@
+local git_parse = require('guit.git_parse')
+
 local M = {}
 
 local function parent_spec(commit)
@@ -8,56 +10,18 @@ function M.parent_of(commit)
   return parent_spec(commit)
 end
 
-local function parse_name_status(output)
-  local items = {}
-  for _, line in ipairs(vim.split(output or '', '\n', { trimempty = true })) do
-    local status, rest = line:match('^(%S+)%s+(.+)$')
-    if status and rest then
-      local path = rest
-      local old_path = nil
-      if status:match('^R%d+$') or status:match('^C%d+$') then
-        local left, right = rest:match('^(.-)%s+(.+)$')
-        old_path = left
-        path = right or rest
-      end
-
-      items[#items + 1] = {
-        status = status,
-        path = path,
-        old_path = old_path,
-        kind = 'file',
-        additions = 0,
-        deletions = 0,
-      }
-    end
-  end
-  return items
-end
-
-local function parse_numstat(output)
-  local stats = {}
-  local total = { additions = 0, deletions = 0 }
-
-  for _, line in ipairs(vim.split(output or '', '\n', { trimempty = true })) do
-    local add_s, del_s, path = line:match('^(%S+)\t(%S+)\t(.+)$')
-    if add_s and del_s and path then
-      local additions = tonumber(add_s) or 0
-      local deletions = tonumber(del_s) or 0
-      stats[path] = {
-        additions = additions,
-        deletions = deletions,
-      }
-      local prefix, old_name, new_name, suffix = path:match('^(.-){(.-)%s+=>%s+(.-)}(.*)$')
-      if old_name and new_name then
-        stats[prefix .. old_name .. suffix] = stats[path]
-        stats[prefix .. new_name .. suffix] = stats[path]
-      end
-      total.additions = total.additions + additions
-      total.deletions = total.deletions + deletions
-    end
-  end
-
-  return stats, total
+--- Whether `<commit>^` resolves, i.e. the commit is not a root commit.
+--- Synchronous, one rev-parse; for the moment a pane needs the answer before
+--- the commit's metadata has arrived.
+---@param cwd string
+---@param commit string
+---@return boolean
+function M.has_parent(cwd, commit)
+  local result = vim.system(
+    { 'git', 'rev-parse', '--verify', '--quiet', parent_spec(commit) },
+    { cwd = cwd, text = true }
+  ):wait()
+  return result.code == 0
 end
 
 function M.enrich_with_numstat(items, stats)
@@ -79,6 +43,13 @@ function M.fetch_changed_files(opts, on_done)
     '--no-commit-id',
     '--name-status',
     '-r',
+    -- -z keeps paths raw: no core.quotePath escaping, no ambiguity for paths
+    -- containing spaces, tabs or newlines.
+    '-z',
+    -- Without -m a merge commit produces no output at all; --first-parent
+    -- picks the mainline side so the result stays a single file list.
+    '-m',
+    '--first-parent',
     ('--format='),
     opts.commit,
   }
@@ -93,7 +64,7 @@ function M.fetch_changed_files(opts, on_done)
         return
       end
 
-      on_done(parse_name_status(result.stdout))
+      on_done(git_parse.name_status_z(result.stdout))
     end)
   end)
 end
@@ -108,6 +79,9 @@ function M.fetch_numstat(opts, on_done)
     '--no-commit-id',
     '--numstat',
     '-r',
+    '-z',
+    '-m',
+    '--first-parent',
     ('--format='),
     opts.commit,
   }
@@ -122,7 +96,7 @@ function M.fetch_numstat(opts, on_done)
         return
       end
 
-      local stats, total = parse_numstat(result.stdout)
+      local stats, total = git_parse.numstat_z(result.stdout)
       on_done(stats, total)
     end)
   end)

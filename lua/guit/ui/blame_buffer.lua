@@ -1,5 +1,6 @@
 local blame = require('guit.blame')
 local config = require('guit.config')
+local keymaps = require('guit.keymaps')
 local fugitive = require('guit.fugitive')
 local git = require('guit.git')
 local history = require('guit.history')
@@ -546,17 +547,6 @@ local function open_file_revision(state)
       pcall(vim.api.nvim_win_set_cursor, 0, { line, math.min(target_col, #line_text_at_target) })
     end
     push_target_snapshot(state, snapshot)
-    local bufnr = vim.api.nvim_get_current_buf()
-    if vim.api.nvim_buf_is_valid(bufnr) then
-      vim.keymap.set('n', '<C-o>', function()
-        jump_target_back(state)
-      end, {
-        buffer = bufnr,
-        silent = true,
-        nowait = true,
-        desc = 'Return to Guit blame',
-      })
-    end
   end)
   if opened then
     local target = resolve_target(state.target_winid)
@@ -836,8 +826,30 @@ function resolve_target(winid)
     cwd = repo,
     path = path,
     rev = source.commit,
-    replaced = not source.commit and history.is_replaced_path(repo, path),
+    -- Resolved asynchronously once the target settles: `git status` is far too
+    -- slow to run on a window switch, and this only refines rendering.
+    replaced = false,
   }
+end
+
+--- Confirms in the background whether the blamed path was deleted and recreated,
+--- then re-renders if that changes what the blame shows.
+local function probe_replaced(state)
+  if state.rev or state.replaced_probed then
+    return
+  end
+  state.replaced_probed = true
+
+  local cwd, path = state.cwd, state.path
+  history.is_replaced_path_async(cwd, path, function(replaced)
+    if not valid_buf(state.bufnr) or state.cwd ~= cwd or state.path ~= path then
+      return
+    end
+    if replaced ~= state.replaced then
+      state.replaced = replaced
+      render(state)
+    end
+  end)
 end
 
 local function same_target(state, target)
@@ -905,6 +917,7 @@ local function fetch_target(state, opts)
     state.items = items or {}
     render(state)
     sync_to_target(state)
+    probe_replaced(state)
   end)
 end
 
@@ -925,36 +938,60 @@ function set_target(state, target, opts)
   state.path = target.path
   state.rev = target.rev
   state.replaced = target.replaced
+  state.replaced_probed = false
   fetch_target(state, opts)
 end
 
 local function set_keymaps(state)
-  local opts = { buffer = state.bufnr, nowait = true, silent = true }
-  vim.keymap.set('n', config.options.keymaps.open, function() open_file_revision(state) end, opts)
-  vim.keymap.set('n', config.options.keymaps.commit, function() open_commit(state, true) end, opts)
-  vim.keymap.set('n', config.options.keymaps.commit_focus, function() open_commit(state, false) end, opts)
-  vim.keymap.set('n', config.options.keymaps.open_show, function() open_show(state) end, opts)
-  vim.keymap.set('n', config.options.keymaps.toggle_view, function() cycle_mode(state) end, opts)
-  vim.keymap.set('n', '<C-o>', function() jump_target_back(state) end, opts)
-  vim.keymap.set('n', config.options.keymaps.close, function()
-    if valid_win(state.winid) then
-      vim.api.nvim_win_close(state.winid, true)
-    end
-  end, opts)
-  vim.keymap.set('n', config.options.keymaps.help, function()
-    vim.notify(table.concat({
-      'Guit blame help',
-      '',
-      '  <CR>  open file at blamed revision in the target window',
-      '  <C-o> jump back in the target window and keep focus here',
-      '  c     open blamed commit in Fugitive and keep focus here',
-      '  C     open blamed commit in Fugitive and move focus to target',
-      '  s     open Guit show for blamed commit',
-      '  t     cycle blame color mode',
-      '  q     close blame pane',
-      '  ?     show this help',
-    }, '\n'), vim.log.levels.INFO, { title = 'guit.nvim' })
-  end, opts)
+  local handlers = {
+    open = open_file_revision,
+    open_focus = function(s)
+      open_file_revision(s)
+      if valid_win(s.target_winid) then
+        vim.api.nvim_set_current_win(s.target_winid)
+      end
+    end,
+    commit = function(s)
+      open_commit(s, true)
+    end,
+    commit_focus = function(s)
+      open_commit(s, false)
+    end,
+    open_show = open_show,
+    -- "change display mode", the same contract t has in the file panes.
+    toggle_view = cycle_mode,
+    -- Back to the buffer the target window showed before blame opened it.
+    -- This used to be <C-o>, which shadowed the jumplist.
+    back = jump_target_back,
+    refresh = function(s)
+      fetch_target(s)
+    end,
+    focus_target = function(s)
+      if valid_win(s.target_winid) then
+        vim.api.nvim_set_current_win(s.target_winid)
+      end
+    end,
+    close = function(s)
+      if valid_win(s.winid) then
+        vim.api.nvim_win_close(s.winid, true)
+      end
+    end,
+    yank_hash = function(s)
+      local item = current_item(s)
+      if item and item.hash then
+        ui_util.yank(item.hash)
+      end
+    end,
+    cmdline = function(s)
+      local item = current_item(s)
+      if item and item.hash then
+        ui_util.put_on_cmdline(item.hash)
+      end
+    end,
+  }
+
+  handlers.help = keymaps.help_handler('Guit blame', handlers)
+  keymaps.apply(state, handlers)
 end
 
 local function attach_autocmds(state)
@@ -1090,7 +1127,6 @@ function M.open(opts)
   vim.bo[bufnr].buftype = 'nofile'
   vim.bo[bufnr].bufhidden = 'wipe'
   vim.bo[bufnr].swapfile = false
-  vim.bo[bufnr].filetype = 'guitblame'
   vim.bo[bufnr].modifiable = false
   vim.bo[bufnr].readonly = true
 
@@ -1099,7 +1135,7 @@ function M.open(opts)
     target_bufnr = opts.target_bufnr,
     cwd = opts.cwd,
     path = opts.path,
-    replaced = opts.replaced or (not opts.rev and history.is_replaced_path(opts.cwd, opts.path)),
+    replaced = opts.replaced or false,
     mode = opts.mode or config.options.blame.mode,
     items = {},
     ns = vim.api.nvim_create_namespace(('guit-blame-%d'):format(bufnr)),
@@ -1110,6 +1146,9 @@ function M.open(opts)
   state.rev = opts.rev
   state_by_buf[bufnr] = state
   set_keymaps(state)
+  -- Set last: FileType fires here, so after/ftplugin/guitblame.lua runs after the
+  -- plugin's own mappings and can override them.
+  vim.bo[bufnr].filetype = 'guitblame'
   attach_autocmds(state)
   fetch_target(state)
 end
