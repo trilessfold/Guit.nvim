@@ -1,3 +1,4 @@
+local config = require('guit.config')
 local diff = require('guit.ui.diff')
 local git = require('guit.git')
 local inline_diff = require('guit.ui.inline_diff')
@@ -12,8 +13,10 @@ local keymaps = require('guit.keymaps')
 --- heading -- which is parsed here the same way fugitive itself does it.
 ---
 --- In a fugitive blob buffer (`fugitive://.../<commit>/<path>`), where
---- fugitive maps dd to `Gdiffsplit!` against the parent, di is |:Guit-inline|
---- against the parent.
+--- fugitive maps dd to `Gdiffsplit!` against the parent, di toggles the inline
+--- diff: the comparison a Guit pane drew there, such as a :Guit compare
+--- between two revisions, or |:Guit-inline| against the parent otherwise.
+--- With `diff.mode = 'inline'` dd does the same, see attach_blob.
 local M = {}
 
 -- Fugitive has no conflicts section: an unmerged file appears under both
@@ -199,8 +202,7 @@ function M.open_inline()
   end
 end
 
-local function map(bufnr, rhs, desc)
-  local lhs = keymaps.key_for('fugitive_inline')
+local function map(bufnr, lhs, rhs, desc)
   if not lhs then
     return
   end
@@ -214,14 +216,31 @@ end
 
 --- Installs di into a `:Git` status buffer.
 function M.attach_status(bufnr)
-  map(bufnr, M.open_inline, 'open the file under the cursor as an inline diff')
+  map(bufnr, keymaps.key_for('fugitive_inline'), M.open_inline,
+    'open the file under the cursor as an inline diff')
 end
 
---- Installs di into a fugitive blob buffer.
+--- Installs di into a fugitive blob buffer, and dd as well when `diff.mode`
+--- is inline.
+---
+--- Fugitive maps dd in a read-only blob to Gdiffsplit! against the parent,
+--- which always opens a side-by-side split. Everywhere else in Guit dd opens
+--- the shape `diff.mode` selects, so with 'inline' a dd pressed in the inline
+--- viewer used to open a split next to it anyway. With 'inline', dd in a blob
+--- is therefore the same toggle as di. Fugitive fires User FugitiveBlob after
+--- installing its own mappings, so this one wins. With 'split' fugitive's dd
+--- already is the split and is left alone. Buffers that can be edited, such
+--- as index objects, never get it: there dd deletes a line.
 function M.attach_blob(bufnr)
-  map(bufnr, function()
+  local function toggle()
     require('guit').inline()
-  end, 'inline diff against the parent commit')
+  end
+  map(bufnr, keymaps.key_for('fugitive_inline'), toggle,
+    'toggle the inline diff: the Guit pane comparison, or against the parent commit')
+  if config.options.diff.mode == 'inline' and not vim.bo[bufnr].modifiable then
+    map(bufnr, keymaps.key_for('open_diff'), toggle,
+      'toggle the inline diff, as diff.mode says: the Guit pane comparison, or against the parent')
+  end
 end
 
 return M

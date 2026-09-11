@@ -146,17 +146,16 @@ local RANGE_PANES = {
 ---@param line2 integer
 ---@return string|nil left
 ---@return string|nil right
----@return string|nil cwd the pane's repository, which need not be Neovim's cwd
 local function range_to_revisions(line1, line2)
   local bufnr = vim.api.nvim_get_current_buf()
   local module = RANGE_PANES[vim.bo[bufnr].filetype]
   if not module then
-    return nil, nil, nil
+    return nil, nil
   end
 
-  local items, cwd = require(module).items_in_range(bufnr, line1, line2)
+  local items = require(module).items_in_range(bufnr, line1, line2)
   if #items == 0 then
-    return nil, nil, nil
+    return nil, nil
   end
 
   -- The log reads newest first, so the first selected line is the newer end.
@@ -166,7 +165,7 @@ local function range_to_revisions(line1, line2)
       and EMPTY_TREE
       or (oldest.hash .. '^')
 
-  return left, newest.hash, cwd
+  return left, newest.hash
 end
 
 --- Splits the revision arguments of `:Guit compare`.
@@ -201,11 +200,13 @@ function M.parse_compare_args(first, second)
   return first, nil, false
 end
 
+---@return boolean opened false when nothing was opened, so a pane that
+---offered its window for the comparison keeps it
 function M.compare(left, right, opts)
   opts = opts or {}
   if not left or left == '' then
     vim.notify('guit.nvim: usage :Guit compare <left_rev> <right_rev>', vim.log.levels.INFO)
-    return
+    return false
   end
   -- A single revision compares it against the working tree, which is what git
   -- itself does for `git diff <rev>`.
@@ -218,10 +219,11 @@ function M.compare(left, right, opts)
   local repo, err = git.repo_root(cwd)
   if not repo then
     vim.notify('guit.nvim: ' .. err, vim.log.levels.ERROR)
-    return
+    return false
   end
 
   compare_buffer.open(vim.tbl_extend('force', opts, { cwd = repo, left = left, right = right, symmetric = opts.symmetric }))
+  return true
 end
 
 function M.status(opts)
@@ -288,6 +290,13 @@ function M.inline(rev)
 
   if (not rev or rev == '') and inline_diff.is_attached(bufnr) then
     inline_diff.detach(bufnr)
+    return
+  end
+
+  -- An overlay a pane drew on this buffer comes back as that pane's own
+  -- comparison, such as the two revisions of a :Guit compare, not as the
+  -- buffer against its parent commit.
+  if (not rev or rev == '') and require('guit.ui.diff').reattach(bufnr, winid) then
     return
   end
 
@@ -376,12 +385,16 @@ function M.command(args, opts)
   elseif sub == 'compare' then
     -- A range wins over arguments: `V j :Guit compare` should not need any.
     if opts.range and opts.range > 0 and not args[2] then
-      local left, right, cwd = range_to_revisions(opts.line1, opts.line2)
+      local left, right = range_to_revisions(opts.line1, opts.line2)
       if not left then
         vim.notify('guit.nvim: no commits selected', vim.log.levels.WARN)
         return
       end
-      return M.compare(left, right, { cwd = cwd })
+      -- The comparison takes the pane's own window, as show does, instead of
+      -- opening a second pane under it; `-` in compare returns to the pane.
+      local bufnr = vim.api.nvim_get_current_buf()
+      return require(RANGE_PANES[vim.bo[bufnr].filetype])
+        .open_compare(bufnr, left, right, math.min(opts.line1, opts.line2))
     end
     local left, right, symmetric = M.parse_compare_args(args[2], args[3])
     return M.compare(left, right, { symmetric = symmetric })

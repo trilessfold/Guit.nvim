@@ -9,64 +9,14 @@ local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
 local diff = require('guit.ui.diff')
+local handoff = require('guit.ui.handoff')
 local session = require('guit.session')
 
 local M = {}
 
 local state_by_buf = {}
 
-local function return_to_panel(state)
-  if state.winid and vim.api.nvim_win_is_valid(state.winid) then
-    vim.api.nvim_set_current_win(state.winid)
-  elseif state.bufnr and vim.api.nvim_buf_is_valid(state.bufnr) then
-    vim.cmd('buffer ' .. state.bufnr)
-  end
-end
 
-local function return_to_log(state)
-  local origin = state.source_log
-  if not origin then
-    vim.notify('guit.nvim: original Guit log buffer is no longer available', vim.log.levels.WARN)
-    return
-  end
-
-  local winid = state.winid
-  if not winid or not vim.api.nvim_win_is_valid(winid) then
-    return
-  end
-
-  if not origin.bufnr or not vim.api.nvim_buf_is_valid(origin.bufnr) then
-    if origin.snapshot then
-      session.open_snapshot(origin.snapshot, {
-        reuse_winid = winid,
-        target_winid = state.target_winid,
-        preview = state.preview,
-      })
-      return
-    end
-
-    vim.notify('guit.nvim: original Guit log buffer is no longer available', vim.log.levels.WARN)
-    return
-  end
-
-  vim.bo[origin.bufnr].bufhidden = 'hide'
-  ui_util.with_winfixbuf_disabled(winid, function()
-    vim.api.nvim_win_set_buf(winid, origin.bufnr)
-  end)
-  local line = math.max(1, math.min(origin.line or 1, vim.api.nvim_buf_line_count(origin.bufnr)))
-  vim.api.nvim_win_set_cursor(winid, { line, 0 })
-  vim.api.nvim_set_current_win(winid)
-  local activators = {
-    guitlog = 'guit.ui.buffer',
-    guithistory = 'guit.ui.history_buffer',
-    guitcompare = 'guit.ui.compare_buffer',
-    guitstatus = 'guit.ui.status_buffer',
-  }
-  local module = activators[vim.bo[origin.bufnr].filetype]
-  if module then
-    require(module).activate(origin.bufnr, winid)
-  end
-end
 
 
 local function snapshot(state)
@@ -235,7 +185,7 @@ end
 local function set_keymaps(state)
   keymaps.attach(state, render, {
     title = 'Guit show',
-    back = return_to_log,
+    back = handoff.back,
     refresh = refresh,
     open_file = open_file_diff,
     -- dd always means "diff", in every pane.

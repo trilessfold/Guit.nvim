@@ -181,6 +181,10 @@ ma  …  mb  :'a,'bGuit compare   " marks, visible in :marks
 :5,12Guit compare
 ```
 
+The comparison opens in the pane's own window, the way `s` opens `Guit show`,
+and `-` in the compare pane returns to the log or history. `dd` in a log pane
+works the same way.
+
 The range is inclusive — every selected commit appears in the diff, unlike
 git's own `a..b`, which excludes `a`. Selecting the root commit compares
 against the empty tree.
@@ -234,7 +238,12 @@ Guit does not commit, push, rebase, or stage hunks — use fugitive for those.
 :Guit inline          " current buffer against the index (or a fugitive object against its parent)
 :Guit inline main     " against main
 :Guit inline          " again: remove the overlay
+:Guit inline          " once more: bring it back
 ```
+
+An overlay drawn by a Guit pane, such as a `:Guit compare` between two
+revisions, comes back as that same comparison while the pane is open, not as
+the buffer against its parent.
 
 A file diff has two shapes. *Split* is Fugitive's side-by-side vimdiff of two
 buffers. *Inline* is one buffer with the changes drawn on top of it, like VS
@@ -289,6 +298,13 @@ there like fugitive's `dd`; in a `fugitive://` blob buffer it is `:Guit inline`
 against the parent commit. Set `keymaps.fugitive_inline = false` to leave
 fugitive's buffers alone.
 
+With `diff.mode = 'inline'`, `dd` in a `fugitive://` blob buffer does the same
+as `di` instead of fugitive's side-by-side `Gdiffsplit!`, so pressing `dd` in
+the inline viewer never opens a split next to it. With `diff.mode = 'split'`
+fugitive's `dd` is untouched. Set `keymaps.open_diff = false` to always keep
+fugitive's `dd` there. In the inline viewer of a `:Guit compare`, `di` and `dd`
+toggle the diff between the compared revisions off and back on.
+
 ## Blame
 
 ```vim
@@ -332,6 +348,6 @@ Changed-file statuses are color-coded in tree and list views:
 
 Shows commits that touched the given file or directory in a lower pane. The compact stats column uses `<files>f <additions> <deletions>`.
 
-For file history, `<CR>` opens the file diff for the selected commit. Rename commits use the old path on the parent side and the new path on the commit side. History rows include a file-action prefix such as `[M]`, `[A]`, or `[R old/path -> new/path]`.
+For file history, `<CR>` opens the file diff for the selected commit. `dd` opens that same diff in the shape `diff.mode` selects, `di` and `ds` pick inline or side by side, and each replaces whichever shape is already on screen. In a directory history `dd` compares the selected commit against `HEAD`. Rename commits use the old path on the parent side and the new path on the commit side. History rows include a file-action prefix such as `[M]`, `[A]`, or `[R old/path -> new/path]`.
 
 With a command range, `Guit history` opens line history for the selected lines in the current file. Line history reuses the same history pane and keymaps, omits the compact stats column, and `<CR>` opens the file revision for the selected commit.

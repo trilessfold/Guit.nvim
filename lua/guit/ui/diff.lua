@@ -15,6 +15,13 @@ local preview = require('guit.ui.preview')
 ---     right = { rev = 'abc', path = 'name.lua' } | { path = 'name.lua' } | nil }
 local M = {}
 
+-- bufnr -> { owner, spec } for the last inline diff a pane drew on that
+-- buffer. Toggling the overlay off and on again from inside the buffer (di,
+-- or dd with diff.mode = 'inline', in a fugitive object) must bring back that
+-- same comparison, the two revisions of a :Guit compare, rather than fall back
+-- to the object against its parent commit.
+local remembered = {}
+
 --- Opens an empty scratch buffer beside the current window and diffs against it.
 ---
 --- Used when one side of a comparison genuinely has no content: a file added by
@@ -146,20 +153,14 @@ local function fetch_lines(cwd, side, on_done)
   end)
 end
 
-local function open_inline(state, spec)
-  local shown = spec.right or spec.left
-  local bufnr
-  local ok, err = preview.with_managed_preview(state, function(anchor_winid)
-    edit_side(spec.cwd, shown)
-    bufnr = vim.api.nvim_win_get_buf(anchor_winid)
-    -- attach does this too, but the old side may take a git show to arrive;
-    -- until then a split diff left over from ds would still be on screen.
-    inline_diff.leave_split(bufnr, anchor_winid)
-  end)
-  if not ok then
-    return false, err
-  end
-
+--- Draws the inline diff a spec describes over `bufnr`, the buffer showing
+--- its new side, fetching the old side from git when there is one.
+---@param state table the pane the overlay belongs to
+---@param bufnr integer
+---@param winid integer|nil the window the cursor jump applies to
+---@param spec table see the module comment
+---@param jump_first boolean move the cursor to the first hunk
+local function attach_spec(state, bufnr, winid, spec, jump_first)
   -- Anything the pane opens after this, and anything that takes the overlay
   -- down, must win over a git show still in flight; the stale result would
   -- otherwise dress up whatever the window shows by then, or undo a split
@@ -168,8 +169,8 @@ local function open_inline(state, spec)
   -- request token, moved on by any detach.
   local generation = state.inline_generation
   local token = inline_diff.begin_request(bufnr)
-  local winid = state.target_winid
   local label = label_of(spec.left)
+  remembered[bufnr] = { owner = state, spec = spec }
 
   local function attach(opts)
     if generation ~= state.inline_generation
@@ -180,7 +181,7 @@ local function open_inline(state, spec)
     local count = inline_diff.attach(bufnr, vim.tbl_extend('force', {
       owner = state,
       label = label,
-      jump_first = true,
+      jump_first = jump_first,
       winid = winid,
     }, opts))
     if count == 0 and not opts.all_deleted then
@@ -201,6 +202,23 @@ local function open_inline(state, spec)
       attach({ old_lines = lines })
     end)
   end
+end
+
+local function open_inline(state, spec)
+  local shown = spec.right or spec.left
+  local bufnr
+  local ok, err = preview.with_managed_preview(state, function(anchor_winid)
+    edit_side(spec.cwd, shown)
+    bufnr = vim.api.nvim_win_get_buf(anchor_winid)
+    -- attach does this too, but the old side may take a git show to arrive;
+    -- until then a split diff left over from ds would still be on screen.
+    inline_diff.leave_split(bufnr, anchor_winid)
+  end)
+  if not ok then
+    return false, err
+  end
+
+  attach_spec(state, bufnr, state.target_winid, spec, true)
   return true
 end
 
@@ -257,6 +275,27 @@ function M.open_object(state, cwd, side, opts)
   end
   return_focus(state, opts.keep_focus)
   return ok
+end
+
+--- Draws again the inline diff a pane last drew on this buffer, while that
+--- pane is still open. Used when the overlay is toggled back on from inside
+--- the buffer, so a :Guit compare diff comes back as the same two revisions.
+---@param bufnr integer
+---@param winid integer|nil
+---@return boolean drawn false when there is no pane comparison to restore
+function M.reattach(bufnr, winid)
+  local entry = remembered[bufnr]
+  if not entry then
+    return false
+  end
+  local owner = entry.owner
+  if not vim.api.nvim_buf_is_valid(bufnr)
+      or not (owner.bufnr and vim.api.nvim_buf_is_valid(owner.bufnr)) then
+    remembered[bufnr] = nil
+    return false
+  end
+  attach_spec(owner, bufnr, winid, entry.spec, false)
+  return true
 end
 
 return M

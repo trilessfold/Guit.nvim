@@ -55,7 +55,10 @@ COMMANDS                                                *guit-commands*
     With a [range] in a |guit-log| or |guit-history| pane, the selected lines
     choose the commits. The range is inclusive: every selected commit appears
     in the diff, unlike git's own {left}..{right}, which excludes {left}.
-    Selecting the root commit compares against the empty tree.
+    Selecting the root commit compares against the empty tree. The
+    comparison opens in that pane's own window, the way |guit-show| does,
+    rather than as a second pane below it; - in the compare pane returns to
+    the log or history with the cursor where it was.
 
     This is how Guit selects commits, and it needs no marking mode of its own,
     because Vim already has two: >
@@ -75,7 +78,10 @@ COMMANDS                                                *guit-commands*
     see |guit-inline-diff|. Without [rev] a working tree file is compared
     against the index (what `git diff` shows) and a Fugitive object against
     its parent (what that commit did to the file). Running the command again
-    without [rev] removes the overlay.
+    without [rev] removes the overlay, and running it once more brings it
+    back. An overlay a Guit pane drew, such as the two revisions of a
+    :Guit compare, comes back as that same comparison while the pane is still
+    open, not as the buffer against its parent.
 
     Command-line completion suggests local branches, remote branches, tags,
     and HEAD.
@@ -104,7 +110,8 @@ Keys:
     c       Same as <CR>. It exists so that the key which opens a commit is
             the same in every pane.
     C       Same as o.
-    dd      Compare the selected commit against HEAD.
+    dd      Compare the selected commit against HEAD, in this pane's window.
+            - in the compare pane returns to the log.
     s       Open |:Guit-show| for the selected commit in the same lower pane.
             Returning from show restores the same log buffer and cursor line.
     y CTRL-G
@@ -197,6 +204,9 @@ Keys:
             Yank <right>:<path> into a register.
     .       Put that object on the command line.
     <Tab>   Jump to the target window.
+    -       Return to the log or history pane this comparison was opened
+            from, by dd or by a [range]. A comparison opened any other way has
+            nothing to return to and leaves - to Vim.
     r       Reload this view.
     q       Close this pane.
     g?      Show the mappings that are actually in effect.
@@ -292,7 +302,12 @@ Keys:
             the file revision for a line history, the commit otherwise.
     o       Same, but move focus to the target window.
     c C     Open the selected commit in Fugitive, keeping or moving focus.
-    dd      Compare the selected commit against HEAD.
+    dd      For a file or line history, open the file diff of the selected
+            commit in the shape `diff.mode` selects, replacing an inline or
+            side-by-side diff already on screen. For a directory history,
+            compare the selected commit against HEAD in this pane's window.
+    di ds   File and line history only: open the file diff inline or side by
+            side, whatever `diff.mode` says.
     s       Open |:Guit-show| for the selected commit in the same lower pane.
     y CTRL-G
             Yank the full hash into a register.
@@ -389,10 +404,21 @@ di also works inside fugitive's own buffers, next to fugitive's dd, ds and dv:
 
     In a fugitive blob buffer (`fugitive://.../<commit>/<path>`), di is
     |:Guit-inline|: the file against its parent commit. Pressing it again
-    removes the overlay.
+    removes the overlay, and once more brings it back. When a Guit pane drew
+    the overlay, such as a :Guit compare between two revisions, it comes back
+    as that pane's comparison while the pane is open, not against the parent.
 
-The key is the `fugitive_inline` action; set it to false to leave fugitive's
-buffers alone.
+    With `diff.mode = 'inline'`, dd in a blob buffer does the same as di.
+    Fugitive's own dd there opens a side-by-side split against the parent,
+    which is not what dd means to someone who chose the inline shape, and it
+    would open that split next to an inline diff Guit was already showing.
+    With `diff.mode = 'split'` fugitive's dd is left alone. Buffers that can
+    be edited, such as index objects, never get this mapping, because dd
+    deletes a line there.
+
+The di key is the `fugitive_inline` action; set it to false to leave
+fugitive's buffers alone. The dd key is the `open_diff` action; set that to
+false to keep fugitive's dd in blob buffers whatever `diff.mode` says.
 
 Configuration: >lua
   require('guit').setup({

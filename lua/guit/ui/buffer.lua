@@ -7,6 +7,7 @@ local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local preview = require('guit.ui.preview')
 local keymaps = require('guit.keymaps')
+local handoff = require('guit.ui.handoff')
 local session = require('guit.session')
 
 local M = {}
@@ -239,26 +240,17 @@ local function open_show_from_log(state)
     return
   end
 
-  state.target_winid = (state.target_winid and vim.api.nvim_win_is_valid(state.target_winid)) and state.target_winid or nil
-  vim.bo[state.bufnr].bufhidden = 'hide'
+  handoff.replace(state, { line = line, snapshot = snapshot(state) }, function(opts)
+    return show_buffer.open(vim.tbl_extend('force', opts, { cwd = state.cwd, commit = item.hash }))
+  end, 'Guit show')
+end
 
-  local ok, err = pcall(show_buffer.open, {
-    cwd = state.cwd,
-    commit = item.hash,
-    reuse_winid = state.winid,
-    target_winid = state.target_winid,
-    source_log = {
-      bufnr = state.bufnr,
-      line = line,
-      snapshot = snapshot(state),
-    },
-    preview = state.preview,
-  })
-
-  if not ok then
-    vim.bo[state.bufnr].bufhidden = 'wipe'
-    vim.notify('guit.nvim: failed to open Guit show: ' .. tostring(err), vim.log.levels.ERROR)
-  end
+--- Opens a comparison in the log's own window, as `s` opens show; `-` in the
+--- compare pane returns to the log.
+local function open_compare_from_log(state, left, right, line)
+  return handoff.replace(state, { line = line, snapshot = snapshot(state) }, function(opts)
+    return require('guit').compare(left, right, vim.tbl_extend('force', opts, { cwd = state.cwd }))
+  end, 'Guit compare')
 end
 
 local function set_keymaps(state)
@@ -292,9 +284,12 @@ local function set_keymaps(state)
     commit_focus = with_item(function(s, item)
       open_commit(s, item.hash, { keep_focus = false })
     end),
-    open_diff = with_item(function(s, item)
-      require('guit').compare(item.hash, 'HEAD', { cwd = s.cwd })
-    end),
+    open_diff = function(s)
+      local item, line = get_current_item(s)
+      if item then
+        open_compare_from_log(s, item.hash, 'HEAD', line)
+      end
+    end,
     yank_hash = with_item(function(_, item)
       ui_util.yank(item.hash)
     end),
@@ -383,11 +378,10 @@ end
 ---@param line1 integer
 ---@param line2 integer
 ---@return table[] items
----@return string|nil cwd the repository the commits belong to
 function M.items_in_range(bufnr, line1, line2)
   local state = state_by_buf[bufnr]
   if not state then
-    return {}, nil
+    return {}
   end
 
   local first = math.min(line1, line2)
@@ -399,7 +393,21 @@ function M.items_in_range(bufnr, line1, line2)
       items[#items + 1] = item
     end
   end
-  return items, state.cwd
+  return items
+end
+
+--- Opens a comparison in place of a log pane, for `:[range]Guit compare`.
+---@param bufnr integer the log buffer
+---@param left string
+---@param right string
+---@param line integer|nil the line the cursor returns to on `-`
+---@return boolean opened
+function M.open_compare(bufnr, left, right, line)
+  local state = state_by_buf[bufnr]
+  if not state then
+    return require('guit').compare(left, right) ~= false
+  end
+  return open_compare_from_log(state, left, right, line)
 end
 
 return M

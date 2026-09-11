@@ -8,6 +8,7 @@ local panel = require('guit.ui.changed_file_panel')
 local window = require('guit.ui.window')
 local ui_util = require('guit.ui.util')
 local diff = require('guit.ui.diff')
+local handoff = require('guit.ui.handoff')
 local session = require('guit.session')
 
 local M = {}
@@ -54,6 +55,7 @@ local function snapshot(state)
     left = state.left,
     right = state.right,
     symmetric = state.symmetric,
+    source_log = state.source_log,
     view_mode = state.view_mode,
     restore = {
       line = idx,
@@ -162,6 +164,9 @@ end
 local function set_keymaps(state)
   keymaps.attach(state, render, {
     title = 'Guit compare',
+    -- Only a compare that took over a log or history pane's window has
+    -- somewhere to go back to.
+    back = state.source_log and handoff.back or nil,
     refresh = refresh,
     open_file = open_file_diff,
     open_diff = open_file_diff,
@@ -194,6 +199,7 @@ function M.open(opts)
     view_mode = opts.view_mode or config.options.show.default_view,
     items = {}, entries = {}, tree_state = nil, entry_offset = 0, meta = nil, summary = nil,
     restore = opts.restore, restore_done = false,
+    source_log = opts.source_log,
     preview = opts.preview or { anchor_winid = target_winid, extra_wins = {}, buffers = {} },
   }
   state_by_buf[bufnr] = state

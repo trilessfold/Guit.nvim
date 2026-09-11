@@ -1,4 +1,58 @@
+local config = require('guit.config')
 local fugitive_status = require('guit.fugitive_status')
+
+describe('Guit keys in a fugitive blob buffer', function()
+  local bufnr
+
+  before_each(function()
+    bufnr = vim.api.nvim_create_buf(false, true)
+    vim.bo[bufnr].modifiable = false
+  end)
+
+  after_each(function()
+    config.setup({})
+    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
+  end)
+
+  local function guit_map(lhs)
+    return vim.api.nvim_buf_call(bufnr, function()
+      local map = vim.fn.maparg(lhs, 'n', false, true)
+      return type(map) == 'table' and map.buffer == 1 and (map.desc or ''):find('^Guit') ~= nil
+    end)
+  end
+
+  it('binds di whatever the diff mode', function()
+    config.setup({ diff = { mode = 'split' } })
+    fugitive_status.attach_blob(bufnr)
+    assert.is_true(guit_map('di'))
+  end)
+
+  it('takes over dd when diff.mode is inline, so dd never opens a split', function()
+    config.setup({ diff = { mode = 'inline' } })
+    fugitive_status.attach_blob(bufnr)
+    assert.is_true(guit_map('dd'))
+  end)
+
+  it("leaves fugitive's dd alone when diff.mode is split", function()
+    config.setup({ diff = { mode = 'split' } })
+    fugitive_status.attach_blob(bufnr)
+    assert.is_false(guit_map('dd'))
+  end)
+
+  it('never maps dd in a buffer that can be edited', function()
+    config.setup({ diff = { mode = 'inline' } })
+    vim.bo[bufnr].modifiable = true
+    fugitive_status.attach_blob(bufnr)
+    assert.is_false(guit_map('dd'))
+  end)
+
+  it('keeps dd for fugitive when open_diff is disabled', function()
+    config.setup({ diff = { mode = 'inline' }, keymaps = { open_diff = false } })
+    fugitive_status.attach_blob(bufnr)
+    assert.is_false(guit_map('dd'))
+    assert.is_true(guit_map('di'))
+  end)
+end)
 
 -- A :Git status buffer as fugitive renders it, with one hunk expanded.
 local STATUS = {

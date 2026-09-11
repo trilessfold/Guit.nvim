@@ -17,7 +17,7 @@ local function commit(n, parents)
 end
 
 describe(':[range]Guit compare', function()
-  local real_page, real_total, real_compare, opened
+  local real_page, real_total, real_compare, opened, log_win, log_buf
 
   before_each(function()
     opened = nil
@@ -43,6 +43,7 @@ describe(':[range]Guit compare', function()
     vim.cmd('silent! %bwipeout!')
     vim.cmd('topleft new')
     buffer.open({ cwd = vim.uv.cwd() })
+    log_win, log_buf = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
   end)
 
   after_each(function()
@@ -67,6 +68,16 @@ describe(':[range]Guit compare', function()
     vim.cmd([[1,2Guit compare]])
 
     assert.equals(vim.uv.cwd(), opened.opts.cwd)
+  end)
+
+  it("opens in the log's own window and remembers the way back", function()
+    -- A second pane below the log became compare's target window, so the
+    -- first file diff from compare replaced the log.
+    vim.cmd([[1,2Guit compare]])
+
+    assert.equals(log_win, opened.opts.reuse_winid)
+    assert.equals(log_buf, opened.opts.source_log.bufnr)
+    assert.equals(1, opened.opts.source_log.line)
   end)
 
   it('compares a single line against its parent', function()

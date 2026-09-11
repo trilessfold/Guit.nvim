@@ -188,6 +188,7 @@ local function restore_compare(snapshot, opts)
     left = snapshot.left,
     right = snapshot.right,
     symmetric = snapshot.symmetric,
+    source_log = snapshot.source_log,
     view_mode = snapshot.view_mode,
     restore = snapshot.restore,
     reuse_winid = opts.reuse_winid,
